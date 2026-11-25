@@ -1,0 +1,32 @@
+# Render (plan gratis): la API de Radar Prop. La app web está en Netlify y le reenvía /api/* a este servicio.
+# El único dato que hay que cargar a mano es DATABASE_URL (la conexión a Supabase), como secreto.
+services:
+  - type: web
+    name: radar-prop-api
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: radar-prop-para-github/backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips="*"
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: COOKIE_PATH
+        value: /api/auth
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: FRONTEND_ORIGIN
+        value: https://radar-prop.netlify.app
+      - key: APP_URL
+        value: https://radar-prop.netlify.app
+      - key: DB_POOL_SIZE
+        value: "3"
+      - key: DB_MAX_OVERFLOW
+        value: "2"

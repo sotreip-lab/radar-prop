@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="es"><head><script>
+/* Radar Prop: esta pantalla vive dentro de la app. Pide el token a la ventana principal (no se guarda en ningún lado)
+   y llama a la API nueva. Los errores vuelven como {ok:false,msg} igual que en El Ojo de Dios. */
+(function(){
+  const orig = window.fetch.bind(window);
+  async function token(){ try { return await window.parent.__radarToken(); } catch(e) { return null; } }
+  window.fetch = async function(url, op){
+    op = Object.assign({}, op || {});
+    if (typeof url === 'string' && url.startsWith('/api/')) {
+      const h = new Headers(op.headers || {});
+      const t = await token(); if (t) h.set('Authorization', 'Bearer ' + t);
+      if (typeof op.body === 'string') h.set('Content-Type', 'application/json');
+      op.headers = h; op.credentials = 'include';
+      let r = await orig(url, op);
+      if (r.status === 401) { const t2 = await token(); if (t2) { h.set('Authorization', 'Bearer ' + t2); r = await orig(url, op); } }
+      if (!r.ok) { let msg = 'No se pudo completar. Probá de nuevo.'; try { msg = (await r.json()).detail || msg } catch(e) {}
+        return new Response(JSON.stringify({ok:false, msg}), {status: 200, headers: {'Content-Type':'application/json'}}); }
+      return r;
+    }
+    return orig(url, op);
+  };
+})();
+</script><meta charset="utf-8"><title>Mapa de valores · Radar Prop</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/static/leaflet.css">
+<style>
+:root{--ink:#1f2328;--mute:#6b7280;--line:#e5e7eb;--bg:#f6f7f9;--card:#fff;--acc:#256abf}
+*{box-sizing:border-box}body{margin:0;font:13px/1.45 "Segoe UI",system-ui,sans-serif;color:var(--ink);background:var(--bg);height:100vh;display:flex;flex-direction:column}
+header{display:flex;align-items:center;gap:14px;padding:10px 16px;background:#111827;color:#fff}
+header h1{font-size:16px;margin:0;font-weight:700}header .sub{color:#9ca3af;font-size:12px}
+header a{color:#cbd5e1;margin-left:auto;text-decoration:none;border:1px solid #374151;padding:5px 10px;border-radius:6px}
+main{flex:1;display:grid;grid-template-columns:270px 1fr 540px;min-height:0}
+aside{background:var(--card);border-right:1px solid var(--line);padding:12px 14px;overflow:auto}
+label.f{display:block;font-weight:600;margin:12px 0 4px;font-size:12px;color:#374151}
+.seg{display:flex;flex-wrap:wrap;gap:4px}.seg span{border:1px solid var(--line);border-radius:6px;padding:4px 8px;cursor:pointer;background:#fff;user-select:none}
+.seg span.on{background:var(--acc);border-color:var(--acc);color:#fff}
+select,input[type=number]{width:100%;padding:6px;border:1px solid var(--line);border-radius:6px;font:inherit}
+.chk{display:flex;gap:6px;align-items:flex-start;margin:8px 0;cursor:pointer}
+.nota{background:#fff8e6;border:1px solid #f5d48a;border-radius:8px;padding:8px 10px;margin-top:12px;font-size:12px}
+#map{height:100%;min-height:0}
+.panel{background:var(--card);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.panel .top{padding:10px 12px;border-bottom:1px solid var(--line)}
+.kpis{display:flex;gap:8px}.kpi{flex:1;border:1px solid var(--line);border-radius:8px;padding:6px 8px}.kpi b{display:block;font-size:17px}.kpi span{color:var(--mute);font-size:11px}
+.tbl{overflow:auto;flex:1}table{border-collapse:collapse;width:100%}th,td{font-size:12px;padding:5px 6px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{position:sticky;top:0;background:#f9fafb;font-size:11px;color:#4b5563;cursor:pointer;z-index:1}td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+td:first-child{max-width:150px;overflow:hidden;text-overflow:ellipsis}
+tr.b:hover{background:#eef4fd;cursor:pointer}tr.sel{background:#dbe8fa}
+.mute{color:var(--mute)}.pill{display:inline-block;border-radius:10px;padding:0 7px;font-size:11px;border:1px solid var(--line)}
+.p-cierre{background:#e7f0fb;border-color:#9ec5f4}.p-obs{background:#fff4db;border-color:#f5d48a}.p-desc{background:#f3f4f6;color:#6b7280}
+.base-gris{filter:grayscale(1) contrast(.85) brightness(1.08)}
+.leg{position:absolute;z-index:500;left:10px;bottom:22px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:11px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.leg .bar{height:10px;width:220px;border-radius:3px;margin:4px 0 2px}.leg .ends{display:flex;justify-content:space-between;width:220px}
+.lbl{background:transparent;border:0;box-shadow:none;font-weight:700;font-size:11px;color:#111;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;white-space:nowrap;text-align:center}
+.lbl.debil{color:#4b5563;font-weight:600}
+.lbl small{display:block;font-weight:500;color:#374151}
+.det{padding:8px 12px;border-top:2px solid var(--line);max-height:44%;overflow:auto;background:#fcfcfb}
+.det h3{margin:2px 0 6px;font-size:14px}.det .it{padding:5px 0;border-bottom:1px dashed var(--line)}
+.vacio{padding:18px;color:var(--mute)}
+</style><style>
+@media (max-width: 900px){ body{height:auto;min-height:100vh} main{display:flex!important;flex-direction:column} aside,.panel{border:0!important}
+ #map{height:60vh!important} header{flex-wrap:wrap} }
+</style></head><body>
+<header><h1>Mapa de valores por m²</h1><span class="sub" id="sub">Cargando…</span></header>
+<main>
+<aside>
+  <label class="f">Mostrar en el mapa</label>
+  <div class="seg" id="capa"><span data-v="cierre" class="on">Cierres probables</span><span data-v="pub">Publicadas hoy</span><span data-v="dif">Diferencia</span></div>
+  <label class="f">Dividir el mapa por</label>
+  <div class="seg" id="div"><span data-v="cpu" class="on">Zonas del CPU (Municipio)</span><span data-v="barrios">Barrios (Municipio)</span><span data-v="auto">Barrio del aviso</span></div>
+  <label class="f">Tipo de propiedad</label>
+  <div class="seg" id="tipo"></div>
+  <label class="f">Dormitorios <span class="mute">(casas y departamentos)</span></label>
+  <div class="seg" id="dorm"><span data-v="" class="on">Todos</span><span data-v="0">Mono</span><span data-v="1">1</span><span data-v="2">2</span><span data-v="3">3</span><span data-v="4">4+</span></div>
+  <label class="f">Dadas de baja en los últimos</label>
+  <div class="seg" id="periodo"><span data-v="30">30 días</span><span data-v="90">3 meses</span><span data-v="180">6 meses</span><span data-v="365">1 año</span><span data-v="" class="on">Todo</span></div>
+  <label class="f">Ciudad</label><select id="ciudad"></select>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div><label class="f">Mínimo para pintar</label><input type="number" id="minN" value="3" min="1" max="30"></div>
+  <div><label class="f">Rango posible (±%)</label><input type="number" id="rango" value="3" min="0" max="30" step="0.5"></div></div>
+  <label class="chk"><input type="checkbox" id="obs"> <span>Incluir bajas <b>en observación</b> (bajaron hace poco y todavía pueden reaparecer)</span></label>
+  <div class="nota"><b>Cómo se calcula.</b> Una baja no siempre es una venta. Se cuenta como <b>cierre probable</b> solo si no sigue publicada en otro portal ni por otra inmobiliaria, no volvió a publicarse, no se bajó a los pocos días y pasaron <b id="esp">21</b> días sin que reaparezca. El valor es el <b>último precio publicado</b> antes de la baja: la escritura suele cerrar algo por debajo. Los precios de relleno (111.111.111, 11.111.111, 99.999, etc.) no se usan. El rango muestra el valor ±3% (lo podés cambiar).
+  <div style="margin-top:6px">La base registra bajas desde <b id="ini"></b>, así que el mapa de cierres se va llenando con el tiempo. Mientras tanto, “Publicadas hoy” ya muestra el mapa completo.</div></div>
+</aside>
+<div style="position:relative;min-height:0"><div id="map"></div><div class="leg" id="leg"></div></div>
+<div class="panel">
+  <div class="top"><div class="kpis" id="kpis"></div></div>
+  <div class="tbl"><table><thead><tr id="th"></tr></thead><tbody id="tb"></tbody></table></div>
+  <div class="det" id="det" style="display:none"></div>
+</div>
+</main>
+<script src="/static/leaflet.js"></script><script src="/static/d3-delaunay.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const fmt=n=>n==null?'—':Math.round(n).toLocaleString('es-AR');
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const norm=s=>(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim();
+const med=a=>{if(!a.length)return null;const b=[...a].sort((x,y)=>x-y),m=b.length>>1;return b.length%2?b[m]:(b[m-1]+b[m])/2};
+const TIPOS=['Todos','Departamento','Casa','PH','Terreno','Local','Oficina','Depósito / Galpón','Cochera','Quinta / Campo'];
+$('tipo').innerHTML=TIPOS.map((t,i)=>`<span data-v="${i?t:''}"${t==='Casa'?' class="on"':''}>${t}</span>`).join('');
+document.querySelectorAll('.seg').forEach(s=>s.addEventListener('click',async e=>{if(e.target.tagName!=='SPAN')return;[...s.children].forEach(x=>x.classList.toggle('on',x===e.target));if(s.id==='div'){SEL=null;await capa(sv('div'))}pintar()}));
+const sv=id=>(document.querySelector('#'+id+' .on')||{}).dataset?.v??'';
+['ciudad','minN','obs','rango'].forEach(i=>$(i).addEventListener('change',pintar));
+
+// paleta: secuencial azul (magnitud) y divergente rojo-gris-azul (diferencia)
+const SEQ=['#cde2fb','#9ec5f4','#6da7ec','#3987e5','#256abf','#184f95','#0d366b'];
+const DIV_NEG=['#f0efec','#f2c4c3','#ea8b8a','#e34948','#b33433'], DIV_POS=['#f0efec','#b7d3f6','#6da7ec','#2a78d6','#184f95'];
+const hex2=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16));
+const mix=(a,b,t)=>{const A=hex2(a),B=hex2(b);return '#'+A.map((v,i)=>Math.round(v+(B[i]-v)*t).toString(16).padStart(2,'0')).join('')};
+const rampa=(r,t)=>{t=Math.max(0,Math.min(1,t));const x=t*(r.length-1),i=Math.min(r.length-2,Math.floor(x));return mix(r[i],r[i+1],x-i)};
+
+let LABELS=[], BORDES=[], BLAY=null, D=null, MAP=null, CAPA=null, LBL=null, SECT=null, SEL=null, ORDEN='n';
+async function cargar(){
+  const j=await (await fetch('/api/mercado')).json(); D=j;
+  $('esp').textContent=j.espera; $('ini').textContent=(j.inicio_base||'').slice(0,10).split('-').reverse().join('/')||'—';
+  const cs={}; j.regs.forEach(r=>{if(r.c)cs[r.c]=(cs[r.c]||0)+1});
+  $('ciudad').innerHTML=Object.entries(cs).sort((a,b)=>b[1]-a[1]).map(([c,n])=>`<option${c==='Bahía Blanca'?' selected':''}>${esc(c)}</option>`).join('');
+  $('sub').textContent=`dólar ${fmt(j.dolar)} · actualizado ${j.generado}`;
+  MAP=L.map('map',{preferCanvas:false}).setView([-38.7183,-62.2663],13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap',className:'base-gris'}).addTo(MAP);
+  armarSectores(); await capa('cpu'); pintar();
+}
+const POLIS={};
+async function capa(c){
+  if(c==='auto'||POLIS[c]) return;
+  try{ const j=await (await fetch('/api/mercado/capa?c='+c)).json(); POLIS[c]={};
+    for(const f of j){ let best=null,ar=0; for(const ring of f.p){ const a=Math.abs(ring.reduce((s,p,i)=>{const q=ring[(i+1)%ring.length];return s+p[1]*q[0]-q[1]*p[0]},0)); if(a>ar){ar=a;best=ring} }
+      const la=best.reduce((s,p)=>s+p[0],0)/best.length, ln=best.reduce((s,p)=>s+p[1],0)/best.length;
+      POLIS[c][f.n]={rings:f.p,centro:[la,ln],pts:f.p.flat()}; }
+  }catch(e){ POLIS[c]={} }
+}
+const clave=r=>{const d=sv('div'); return d==='barrios'?(r.zb||'(fuera de los barrios del Municipio)'):d==='cpu'?(r.zc||'(sin zona del CPU)'):(r.b||'(sin barrio)')};
+const SIN=/^\(/;
+
+// ---- sectores: celdas de Voronoi alrededor de cada ubicación conocida, recortadas a ~260 m, agrupadas por barrio
+function armarSectores(){
+  const P=D.puntos, k=Math.cos(-38.72*Math.PI/180), R=0.0024;
+  const xy=P.map(p=>[p[1]*k,p[0]]);
+  const xs=xy.map(p=>p[0]), ys=xy.map(p=>p[1]);
+  const vor=d3.Delaunay.from(xy).voronoi([Math.min(...xs)-.01,Math.min(...ys)-.01,Math.max(...xs)+.01,Math.max(...ys)+.01]);
+  const circ=(c)=>Array.from({length:14},(_,i)=>[c[0]+R*Math.cos(i/14*2*Math.PI),c[1]+R*Math.sin(i/14*2*Math.PI)]);
+  const clip=(subj,clipPoly)=>{ // Sutherland–Hodgman (ambos convexos)
+    let out=subj; for(let i=0;i<clipPoly.length;i++){const a=clipPoly[i],b=clipPoly[(i+1)%clipPoly.length],inp=out;out=[];if(!inp.length)break;
+      const ins=p=>(b[0]-a[0])*(p[1]-a[1])-(b[1]-a[1])*(p[0]-a[0])>=0;
+      const inter=(p,q)=>{const A1=q[1]-p[1],B1=p[0]-q[0],C1=A1*p[0]+B1*p[1],A2=b[1]-a[1],B2=a[0]-b[0],C2=A2*a[0]+B2*a[1],det=A1*B2-A2*B1;return[(B2*C1-B1*C2)/det,(A1*C2-A2*C1)/det]};
+      for(let j=0;j<inp.length;j++){const p=inp[j],q=inp[(j+1)%inp.length];if(ins(q)){if(!ins(p))out.push(inter(p,q));out.push(q)}else if(ins(p))out.push(inter(p,q))}}
+    return out};
+  const area=pl=>pl.reduce((s,p,i)=>{const q=pl[(i+1)%pl.length];return s+p[0]*q[1]-q[0]*p[1]},0)/2;
+  SECT={};
+  for(let i=0;i<P.length;i++){
+    let cell=vor.cellPolygon(i); if(!cell) continue; cell=cell.slice(0,-1); if(area(cell)<0) cell.reverse();
+    const c=circ(xy[i]); const poly=clip(cell,c); if(poly.length<3) continue;
+    const b=P[i][2]; (SECT[b]=SECT[b]||{celdas:[],pts:[]}).celdas.push(poly.map(p=>[p[1],p[0]/k])); SECT[b].pts.push([P[i][0],P[i][1]]);
+  }
+  // bordes entre barrios distintos
+  const bordes=[];
+  for(let i=0;i<P.length;i++) for(const j of vor.delaunay.neighbors(i)){ if(j<=i||P[i][2]===P[j][2]) continue;
+    const ci=vor.cellPolygon(i), cj=vor.cellPolygon(j); if(!ci||!cj) continue;
+    const com=ci.filter(p=>cj.some(q=>Math.abs(q[0]-p[0])<1e-12&&Math.abs(q[1]-p[1])<1e-12)); if(com.length<2) continue;
+    const m=[(xy[i][0]+xy[j][0])/2,(xy[i][1]+xy[j][1])/2], d=Math.hypot(xy[i][0]-xy[j][0],xy[i][1]-xy[j][1]); if(d>2*R) continue;
+    // recorta el borde al alcance de ambas celdas
+    const h=Math.sqrt(Math.max(0,R*R-d*d/4)), dir=[com[1][0]-com[0][0],com[1][1]-com[0][1]], L2=Math.hypot(...dir), u=[dir[0]/L2,dir[1]/L2];
+    if(!L2) continue; const t=p=>(p[0]-m[0])*u[0]+(p[1]-m[1])*u[1]; let t0=Math.max(-h,Math.min(t(com[0]),t(com[1]))), t1=Math.min(h,Math.max(t(com[0]),t(com[1]))); if(t1<=t0) continue;
+    bordes.push({a:P[i][2],b:P[j][2],l:[[m[1]+u[1]*t0,(m[0]+u[0]*t0)/k],[m[1]+u[1]*t1,(m[0]+u[0]*t1)/k]]});
+  }
+  BORDES=bordes;
+  for(const b in SECT){ const s=SECT[b], la=med(s.pts.map(p=>p[0])), ln=med(s.pts.map(p=>p[1]));
+    s.centro=s.pts.reduce((best,p)=>(!best||Math.hypot(p[0]-la,p[1]-ln)<Math.hypot(best[0]-la,best[1]-ln))?p:best,null); }
+}
+
+function filtrar(){
+  const t=sv('tipo'), dm=sv('dorm'), per=sv('periodo'), c=$('ciudad').value, obs=$('obs').checked;
+  const desde=per?new Date(Date.now()-per*864e5).toISOString().slice(0,10):'';
+  return D.regs.filter(r=>r.c===c&&(!t||r.g===t)&&(dm===''||(r.dorm!=null&&(dm==='4'?r.dorm>=4:r.dorm===+dm)))
+    &&(r.est==='pub'||((r.est==='cierre'||(obs&&r.est==='obs'))&&(!desde||r.fecha>=desde))||r.est==='desc'||r.est==='obs'));
+}
+
+function pintar(){
+  if(!D) return;
+  const capa=sv('capa'), minN=+$('minN').value||1, obs=$('obs').checked, F=filtrar();
+  const cuenta=r=>r.est==='cierre'||(obs&&r.est==='obs');
+  const per=sv('periodo'), desde=per?new Date(Date.now()-per*864e5).toISOString().slice(0,10):'';
+  const B={};
+  for(const r of F){ const b=clave(r); const x=B[b]=B[b]||{b,c:[],p:[],regs:[]};
+    if(r.est==='pub'){ if(r.um2) x.p.push(r.um2) } else { if(!desde||r.fecha>=desde){ x.regs.push(r); if(cuenta(r)&&r.um2) x.c.push(r.um2) } } }
+  const filas=Object.values(B).map(x=>({...x,mc:med(x.c),mp:med(x.p),nc:x.c.length,np:x.p.length}));
+  filas.forEach(f=>{f.dif=(f.nc>=minN&&f.np>=minN)?(f.mc/f.mp-1)*100:null; f.val=capa==='cierre'?(f.nc?f.mc:null):capa==='pub'?(f.np?f.mp:null):f.dif; f.n=capa==='cierre'?f.nc:capa==='pub'?f.np:Math.min(f.nc,f.np); f.debil=f.val!=null&&capa!=='dif'&&f.n<minN});
+  // escala
+  let vals=filas.filter(f=>!f.debil&&!SIN.test(f.b)).map(f=>f.val).filter(v=>v!=null).sort((a,b)=>a-b);
+  if(!vals.length) vals=filas.filter(f=>!SIN.test(f.b)).map(f=>f.val).filter(v=>v!=null).sort((a,b)=>a-b);
+  const lo=vals.length?vals[Math.floor(vals.length*.05)]:0, hi=vals.length?vals[Math.ceil(vals.length*.95)-1]:1;
+  const lim=Math.max(5,...vals.map(Math.abs).slice(0)); const dlim=Math.min(40,Math.max(10,Math.ceil(lim/5)*5));
+  const color=v=>v==null?'#d1d5db':capa==='dif'?(v<0?rampa(DIV_NEG,-v/dlim):rampa(DIV_POS,v/dlim)):rampa(SEQ,hi>lo?(v-lo)/(hi-lo):.5);
+  // mapa
+  if(CAPA) MAP.removeLayer(CAPA); if(LBL) MAP.removeLayer(LBL);
+  CAPA=L.layerGroup(); LBL=L.layerGroup(); LABELS=[];
+  const porB=Object.fromEntries(filas.map(f=>[f.b,f]));
+  const c0=$('ciudad').value; window._TIPOS={}; for(const r of D.regs){ if(r.est!=='pub'||r.c!==c0||!r.um2) continue; const k=clave(r); const t=window._TIPOS[k]=window._TIPOS[k]||{}; t[r.g]=(t[r.g]||0)+1 }
+  const div=sv('div'), P=POLIS[div], R=(+$('rango').value||0)/100;
+  const etiqueta=(b,f)=>f.debil?`USD ${fmt(f.val)}<small>${esc(b)}<br>pocos datos (${f.n})</small>`:`${capa==='dif'?(f.val>0?'+':'')+f.val.toFixed(0)+'%':'USD '+fmt(f.val)}<small>${capa!=='dif'&&R?fmt(f.val*(1-R))+' – '+fmt(f.val*(1+R))+'<br>':''}${esc(b)}</small>`;
+  if(div!=='auto'&&P&&Object.keys(P).length){
+    for(const b in P){ const f=porB[b]||{b,nc:0,np:0,val:null};
+      const pol=L.polygon(P[b].rings.map(r=>[r]),{color:'#ffffff',weight:1.3,fillColor:color(f.val),fillOpacity:f.val==null?.15:f.debil?.38:.8,dashArray:f.debil?'4 3':null});
+      pol.bindTooltip(tip(f,capa),{sticky:true}); pol.on('click',()=>elegir(b)); CAPA.addLayer(pol);
+      if(f.val!=null) LABELS.push({b,f,c:P[b].centro,bb:L.latLngBounds(P[b].pts)}); if(false) LBL.addLayer(L.marker(P[b].centro,{interactive:false,icon:L.divIcon({className:'lbl',iconSize:[120,40],iconAnchor:[60,20],html:etiqueta(b,f)})}));
+    }
+    if(BLAY){MAP.removeLayer(BLAY);BLAY=null}
+  } else {
+    if(div!=='auto') $('sub').textContent='No se pudo descargar el mapa del Municipio: uso los barrios que figuran en los avisos';
+    for(const b in SECT){ const f=porB[b]||{b,nc:0,np:0,val:null};
+      const pol=L.polygon(SECT[b].celdas.map(c=>[c]),{stroke:false,fillColor:color(f.val),fillOpacity:f.val==null?.22:.8});
+      pol.bindTooltip(tip(f,capa),{sticky:true}); pol.on('click',()=>elegir(b)); CAPA.addLayer(pol);
+      if(f.val!=null&&SECT[b].centro&&SECT[b].celdas.length>=6) LBL.addLayer(L.marker(SECT[b].centro,{interactive:false,icon:L.divIcon({className:'lbl',iconSize:[120,40],iconAnchor:[60,20],html:etiqueta(b,f)})}));
+    }
+    if(BLAY) MAP.removeLayer(BLAY);
+    BLAY=L.polyline(BORDES.filter(e=>porB[e.a]?.val!=null&&porB[e.b]?.val!=null).map(e=>e.l),{color:'#fff',weight:1.2,opacity:.85,interactive:false}).addTo(MAP);
+  }
+  CAPA.addTo(MAP);
+  const ponerEtiquetas=()=>{ if(!LABELS.length){ MAP.getZoom()>=13?LBL.addTo(MAP):MAP.removeLayer(LBL); return }
+    LBL.clearLayers(); const z=MAP.getZoom();
+    for(const e of LABELS){ const a=MAP.project(e.bb.getNorthWest(),z), b=MAP.project(e.bb.getSouthEast(),z);
+      if(Math.abs(b.x-a.x)<70||Math.abs(b.y-a.y)<34) continue; // la zona es muy chica a este zoom: se ve al acercar o pasando el mouse
+      LBL.addLayer(L.marker(e.c,{interactive:false,icon:L.divIcon({className:'lbl'+(e.f.debil?' debil':''),iconSize:[120,40],iconAnchor:[60,20],html:etiqueta(e.b,e.f)})})); }
+    LBL.addTo(MAP); };
+  ponerEtiquetas(); MAP.off('zoomend').on('zoomend',ponerEtiquetas);
+  // leyenda
+  if(!vals.length){ $('leg').innerHTML=`<b>${capa==='pub'?'Sin publicadas':'Todavía no hay datos suficientes'}</b><div class="mute" style="max-width:260px">${capa==='pub'?'Probá con otro tipo de propiedad.':`Para pintar un barrio hacen falta al menos ${minN} cierres de este tipo. Se van sumando a medida que pasan los ${D.espera} días de cada baja. Podés bajar el mínimo o tildar “Incluir bajas en observación”.`}</div>`; }
+  else $('leg').innerHTML=capa==='dif'
+    ?`<b>Cierre vs. publicado (USD/m²)</b><div class="bar" style="background:linear-gradient(90deg,${[...DIV_NEG].reverse().join(',')},${DIV_POS.slice(1).join(',')})"></div><div class="ends"><span>−${dlim}% o menos</span><span>igual</span><span>+${dlim}%</span></div><div class="mute">Gris claro: sin datos suficientes</div>`
+    :`<b>USD por m² · ${capa==='cierre'?'cierres probables':'publicadas hoy'}</b><div class="bar" style="background:linear-gradient(90deg,${SEQ.join(',')})"></div><div class="ends"><span>${fmt(lo)}</span><span>${fmt(hi)}</span></div><div class="mute">Más claro y punteado: menos de ${minN} propiedades (dato débil). Gris: sin datos</div>`;
+  // KPIs
+  const tc=filas.reduce((s,f)=>s+f.nc,0), tp=filas.reduce((s,f)=>s+f.np,0), allC=filas.flatMap(f=>f.c), allP=filas.flatMap(f=>f.p);
+  const nObs=F.filter(r=>r.est==='obs'&&(!desde||r.fecha>=desde)).length, nDesc=F.filter(r=>r.est==='desc'&&(!desde||r.fecha>=desde)).length;
+  $('kpis').innerHTML=`<div class="kpi"><b>${tc}</b><span>cierres probables${obs?' (con observación)':''}</span></div><div class="kpi"><b>${fmt(med(allC))}</b><span>USD/m² cierre (mediana)</span></div><div class="kpi"><b>${fmt(med(allP))}</b><span>USD/m² publicado (${tp})</span></div>`
+    +`<div class="kpi" title="En observación / descartadas"><b>${nObs} / ${nDesc}</b><span>en observación / descartadas</span></div>`;
+  // tabla
+  const cols=[['b',{barrios:'Barrio',cpu:'Zona CPU',auto:'Barrio'}[div]],['nc','Cierres','n'],['mc','USD/m² cierre','n'],['np','Publ.','n'],['mp','USD/m² pub.','n'],['val',`Rango ±${$('rango').value||0}%`,'n'],['dif','Dif.','n']];
+  $('th').innerHTML=cols.map(([k,t,c])=>`<th class="${c||''}" data-k="${k}">${t}${ORDEN===k?' ▾':''}</th>`).join('');
+  $('th').querySelectorAll('th').forEach(th=>th.onclick=()=>{ORDEN=th.dataset.k;pintar()});
+  filas.sort((a,b)=>(SIN.test(a.b)-SIN.test(b.b))||(ORDEN==='b'?a.b.localeCompare(b.b):((b[ORDEN]??-1e9)-(a[ORDEN]??-1e9))||(b.np-a.np)));
+  $('tb').innerHTML=filas.filter(f=>f.np||f.regs.length).map(f=>`<tr class="b${SEL===f.b?' sel':''}" data-b="${esc(f.b)}"><td><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${color(f.val)};margin-right:6px"></span>${esc(f.b)}</td><td class="n">${f.nc||'<span class="mute">0</span>'}</td><td class="n">${f.nc>=minN?fmt(f.mc):(f.nc?'<span class="mute">'+fmt(f.mc)+'</span>':'—')}</td><td class="n">${f.np}</td><td class="n">${f.np>=minN?fmt(f.mp):'—'}</td><td class="n">${f.val!=null&&capa!=='dif'?fmt(f.val*(1-R))+'–'+fmt(f.val*(1+R)):'—'}</td><td class="n">${f.dif==null?'—':(f.dif>0?'+':'')+f.dif.toFixed(0)+'%'}</td></tr>`).join('')||'<tr><td colspan="7" class="vacio">Sin datos con estos filtros.</td></tr>';
+  $('tb').querySelectorAll('tr.b').forEach(tr=>tr.onclick=()=>elegir(tr.dataset.b));
+  window._FILAS=porB; if(SEL) detalle(SEL);
+}
+function tip(f,capa){ const R=(+$('rango').value||0)/100, rg=v=>R?` (rango ${fmt(v*(1-R))} – ${fmt(v*(1+R))})`:'';
+  const ts=window._TIPOS&&window._TIPOS[f.b], otros=ts?Object.entries(ts).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([g,n])=>`${g}: ${n}`).join(' · '):'';
+  if(f.val==null&&!f.np&&!f.nc) return `<b>${esc(f.b)}</b><br>Sin datos de este tipo de propiedad.${otros?`<br>Publicadas de otros tipos: ${otros}`:''}`;
+  return `<b>${esc(f.b)}</b><br>Cierres probables: ${f.nc||0}${f.nc?` · mediana USD ${fmt(f.mc)}/m²${rg(f.mc)}`:''}<br>Publicadas hoy: ${f.np||0}${f.np?` · mediana USD ${fmt(f.mp)}/m²${rg(f.mp)}`:''}${f.debil?`<br><i>Pocos datos: tomalo como referencia</i>`:''}${f.dif!=null?`<br>Diferencia: <b>${f.dif>0?'+':''}${f.dif.toFixed(1).replace('.',',')}%</b>`:''}`;
+}
+function elegir(b){ SEL=b; const d=sv('div'), s=(d!=='auto'&&POLIS[d]&&POLIS[d][b])||SECT[b]; if(s&&s.pts.length) MAP.fitBounds(L.latLngBounds(s.pts),{maxZoom:15,padding:[40,40]}); pintar(); }
+function detalle(b){
+  const f=window._FILAS[b]; const el=$('det'); if(!f){el.style.display='none';return}
+  const orden={cierre:0,obs:1,desc:2}; const regs=[...f.regs].sort((x,y)=>orden[x.est]-orden[y.est]||(y.fecha||'').localeCompare(x.fecha||''));
+  const nom={cierre:'Cierre probable',obs:'En observación',desc:'Descartada'};
+  el.style.display='block';
+  el.innerHTML=`<h3>${esc(b)} <span class="mute" style="font-weight:400;font-size:12px">· ${f.np} publicadas hoy${f.np?' · mediana USD '+fmt(f.mp)+'/m²':''}</span> <a href="#" style="float:right;font-size:12px" onclick="SEL=null;$('det').style.display='none';pintar();return false">cerrar</a></h3>`+
+   (regs.length?regs.map(r=>`<div class="it"><span class="pill p-${r.est}">${nom[r.est]}</span> <b>${esc(r.tipo)}</b>${r.dorm!=null?` · ${r.dorm===0?'mono':r.dorm+' dorm.'}`:''} · ${esc(r.dir)} — <b>${r.pf?'precio no real (no se usa)':'USD '+fmt(r.usd)}</b>${r.m2?` · ${fmt(r.m2)} m²`:''}${r.um2?` · <b>USD ${fmt(r.um2)}/m²</b>`:''}<br><span class="mute">Baja ${(r.fecha||'').split('-').reverse().join('/')}${r.dias_pub!=null?` · estuvo ${r.dias_pub} días publicada`:''} · ${esc(r.inm||r.f)} · ${esc(r.motivo||'')}</span> · <a href="${esc(r.url)}" target="_blank">aviso</a>${r.otro_url?` · <a href="${esc(r.otro_url)}" target="_blank">donde sigue</a>`:''}</div>`).join('')
+    :'<div class="mute">Todavía no hay bajas en este barrio con estos filtros.</div>');
+}
+cargar().catch(e=>{$('sub').textContent='No se pudo cargar: '+e;console.error(e)});
+</script></body></html>

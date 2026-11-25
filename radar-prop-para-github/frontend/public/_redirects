@@ -1,0 +1,3 @@
+/api/*  https://RADAR_API_HOST/api/:splat  200
+/f/*    https://RADAR_API_HOST/f/:splat  200
+/*      /index.html  200

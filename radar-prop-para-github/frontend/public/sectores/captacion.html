@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="es"><head><script>
+/* Radar Prop: esta pantalla vive dentro de la app. Pide el token a la ventana principal (no se guarda en ningún lado)
+   y llama a la API nueva. Los errores vuelven como {ok:false,msg} igual que en El Ojo de Dios. */
+(function(){
+  const orig = window.fetch.bind(window);
+  async function token(){ try { return await window.parent.__radarToken(); } catch(e) { return null; } }
+  window.fetch = async function(url, op){
+    op = Object.assign({}, op || {});
+    if (typeof url === 'string' && url.startsWith('/api/')) {
+      const h = new Headers(op.headers || {});
+      const t = await token(); if (t) h.set('Authorization', 'Bearer ' + t);
+      if (typeof op.body === 'string') h.set('Content-Type', 'application/json');
+      op.headers = h; op.credentials = 'include';
+      let r = await orig(url, op);
+      if (r.status === 401) { const t2 = await token(); if (t2) { h.set('Authorization', 'Bearer ' + t2); r = await orig(url, op); } }
+      if (!r.ok) { let msg = 'No se pudo completar. Probá de nuevo.'; try { msg = (await r.json()).detail || msg } catch(e) {}
+        return new Response(JSON.stringify({ok:false, msg}), {status: 200, headers: {'Content-Type':'application/json'}}); }
+      return r;
+    }
+    return orig(url, op);
+  };
+})();
+</script><meta charset="utf-8"><title>Captación · Radar Prop</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--ink:#1f2328;--mute:#6b7280;--line:#e5e7eb;--bg:#f6f7f9;--card:#fff;--acc:#0f766e}
+*{box-sizing:border-box}body{margin:0;font:13px/1.45 "Segoe UI",system-ui,sans-serif;color:var(--ink);background:var(--bg)}
+header{display:flex;align-items:center;gap:14px;padding:10px 16px;background:#0b3b36;color:#fff;position:sticky;top:0;z-index:5}
+header h1{font-size:16px;margin:0}header .sub{color:#a7d3cc;font-size:12px}
+header a.v{color:#d1fae5;margin-left:auto;text-decoration:none;border:1px solid #2d6b63;padding:5px 10px;border-radius:6px}
+nav{display:flex;gap:4px;padding:10px 16px 0;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:46px;z-index:4;flex-wrap:wrap}
+nav span{padding:8px 12px;border:1px solid transparent;border-bottom:0;border-radius:8px 8px 0 0;cursor:pointer;color:#374151}
+nav span.on{background:var(--bg);border-color:var(--line);font-weight:700;color:var(--acc)}nav b{font-weight:600;color:var(--mute);margin-left:4px}
+.wrap{padding:14px 16px;max-width:1300px}
+.intro{color:#374151;background:#fff;border:1px solid var(--line);border-left:4px solid var(--acc);border-radius:8px;padding:9px 12px;margin-bottom:12px}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.bar input,.bar select{padding:6px 8px;border:1px solid var(--line);border-radius:6px;font:inherit;background:#fff}
+.btn{border:1px solid var(--acc);background:var(--acc);color:#fff;border-radius:6px;padding:6px 12px;cursor:pointer;font:inherit}
+.btn.sec{background:#fff;color:var(--acc)}.btn.chico{padding:2px 8px;font-size:12px}
+.card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;display:grid;grid-template-columns:1fr 290px;gap:12px}
+.card.descartada{opacity:.55}.card.captada{border-color:#86efac;background:#f0fdf4}
+.t{font-weight:700;font-size:14px}.mute{color:var(--mute)}.mot{color:#92400e;background:#fffbeb;border-radius:6px;padding:2px 7px;display:inline-block;margin:4px 0}
+.cmp{margin-top:4px}.cmp b.up{color:#b33433}.cmp b.dn{color:#184f95}
+.side select,.side textarea{width:100%;font:inherit;border:1px solid var(--line);border-radius:6px;padding:5px}
+.side textarea{height:52px;margin-top:6px;resize:vertical}
+.pill{display:inline-block;border-radius:10px;padding:0 7px;font-size:11px;border:1px solid var(--line);background:#f9fafb;margin-right:4px}
+.warn{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:6px;padding:3px 8px;margin-top:4px}
+.form{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px;display:none}
+.form .g{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.form label{font-size:11px;font-weight:600;color:#374151;display:block}
+.form input,.form select,.form textarea{width:100%;padding:6px;border:1px solid var(--line);border-radius:6px;font:inherit}
+.mas{text-align:center;margin:10px}.vacio{padding:30px;text-align:center;color:var(--mute);background:#fff;border:1px dashed var(--line);border-radius:10px}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:8px 14px;border-radius:8px;display:none;z-index:9}
+a{color:#1c5cab}
+</style><style>
+@media (max-width: 900px){ body{height:auto;min-height:100vh} main{display:flex!important;flex-direction:column} aside,.panel{border:0!important}
+ #map{height:60vh!important} header{flex-wrap:wrap} }
+</style></head><body>
+<header><h1>Captación</h1><span class="sub" id="sub">Cargando…</span></header>
+<nav id="tabs"></nav>
+<div class="wrap">
+  <div class="intro" id="intro"></div>
+  <div class="form" id="form">
+    <div class="g">
+      <div style="grid-column:span 2"><label>Link del aviso (MercadoLibre, Facebook, etc.)</label><input id="fUrl" placeholder="https://..."></div>
+      <div><label>Tipo</label><select id="fTipo"><option>Casa</option><option>Departamento</option><option>PH</option><option>Terreno</option><option>Local</option><option>Oficina</option><option>Depósito</option><option>Cochera</option><option>Quinta</option></select></div>
+      <div><label>Operación</label><select id="fOp"><option>Venta</option><option>Alquiler</option></select></div>
+      <div style="grid-column:span 2"><label>Dirección</label><input id="fDir" placeholder="Zapiola 1473"></div>
+      <div><label>Barrio</label><input id="fBarrio" list="lBarrios"></div>
+      <div><label>Dormitorios</label><input id="fDorm" type="number" min="0"></div>
+      <div><label>Precio</label><input id="fPrecio" placeholder="120000"></div>
+      <div><label>Moneda</label><select id="fMon"><option>USD</option><option value="ARS">$ (pesos)</option></select></div>
+      <div><label>m²</label><input id="fM2" type="number" min="0"></div>
+      <div><label>Teléfono / WhatsApp</label><input id="fTel"></div>
+      <div><label>Nombre del dueño</label><input id="fNom"></div>
+      <div style="grid-column:span 3"><label>Notas</label><input id="fNotas"></div>
+    </div>
+    <div style="margin-top:10px;display:flex;gap:8px"><button class="btn" id="fGuardar">Guardar</button><button class="btn sec" id="fCancelar">Cancelar</button></div>
+  </div>
+  <datalist id="lBarrios"></datalist>
+  <div class="bar" id="bar"></div>
+  <div id="lista"></div>
+  <div class="mas" id="mas"></div>
+</div>
+<div class="toast" id="toast"></div>
+<input type="file" id="archivo" accept=".xlsx,.xlsm,.csv" style="display:none">
+<script>
+const $=id=>document.getElementById(id);
+const fmt=n=>n==null?'—':Math.round(n).toLocaleString('es-AR');
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const norm=s=>(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase();
+const toast=m=>{const t=$('toast');t.textContent=m;t.style.display='block';clearTimeout(t._t);t._t=setTimeout(()=>t.style.display='none',3000)};
+const SIM=m=>m==='ARS'?'$':'USD';
+const PLAT={BBP:'BBP',IBB:'IBB',ZP:'ZonaProp'};
+const ESTADOS=[['por_contactar','Por contactar'],['contactado','Contactado'],['captada','Captada ✔'],['descartada','Descartada']];
+const TABS=[
+ ['duenos','Dueños directos','Propiedades que publica el propio dueño (MercadoLibre, Facebook, carteles). Se cargan a mano o con una planilla, y se comparan con lo que publican las inmobiliarias: si ya la tiene alguna inmobiliaria y si el precio por m² está por encima o por debajo del barrio.'],
+ ['cansadas','Cansadas','Publicadas hace más de un año, o que bajaron de precio dos veces o más. El dueño probablemente está disconforme con cómo se está vendiendo.'],
+ ['bajas_largas','Bajas después de mucho tiempo','Se dieron de baja después de 6 meses o más publicadas y no volvieron a aparecer. Puede que se haya vendido o que se le haya terminado el contrato con la inmobiliaria. Si lo averiguás, marcalo: “Se vendió” suma la operación al Mapa de valores.'],
+ ['multi','Varias inmobiliarias','La misma propiedad (misma dirección, tipo, superficie y precio parecido) publicada por dos o más inmobiliarias: no tiene exclusividad. Las que venden 5 o más inmobiliarias suelen ser emprendimientos y se muestran aparte.'],
+ ['cambio','Cambió de inmobiliaria','Se dio de baja de una inmobiliaria y apareció publicada por otra: el dueño está buscando quién se la venda.'],
+ ['seguimiento','Mi seguimiento','Todas las oportunidades que ya marcaste o les escribiste notas.']];
+let D=null, TAB='duenos', LIM=100, EDIT=null;
+$('tabs').innerHTML=TABS.map(([k,t])=>`<span data-k="${k}"${k===TAB?' class="on"':''}>${t}<b id="n_${k}"></b></span>`).join('');
+$('tabs').onclick=e=>{const s=e.target.closest('span');if(!s)return;TAB=s.dataset.k;LIM=100;[...$('tabs').children].forEach(x=>x.classList.toggle('on',x===s));armarBarra();pintar()};
+
+async function cargar(){
+  $('sub').textContent='Analizando la base…';
+  D=await (await fetch('/api/captacion')).json();
+  const S=D.senales; $('sub').textContent=`dólar ${fmt(D.dolar)} · ${new Date().toLocaleString('es-AR')}`;
+  const bs=new Set(); Object.values(S).flat().forEach(f=>f.b&&bs.add(f.b)); $('lBarrios').innerHTML=[...bs].sort().map(b=>`<option value="${esc(b)}">`).join('');
+  contar(); armarBarra(); pintar();
+}
+function contar(){ const S=D.senales;
+  $('n_duenos').textContent=D.duenos.length; for(const k of ['cansadas','bajas_largas','cambio']) $('n_'+k).textContent=S[k].length;
+  $('n_multi').textContent=S.multi.filter(f=>!f.emprend).length; $('n_seguimiento').textContent=Object.keys(D.seguimiento).length; }
+function armarBarra(){
+  $('intro').innerHTML=TABS.find(t=>t[0]===TAB)[2];
+  const tipos=['','Casa','Departamento','PH','Terreno','Local','Oficina','Depósito / Galpón','Cochera','Quinta / Campo'];
+  let h=`<input id="q" placeholder="Buscar dirección, barrio, inmobiliaria…" style="min-width:260px">
+   <select id="ft">${tipos.map(t=>`<option value="${t}">${t||'Todos los tipos'}</option>`).join('')}</select>
+   <select id="fe"><option value="activas">Ocultar descartadas</option><option value="">Todos los estados</option>${ESTADOS.map(([k,t])=>`<option value="${k}">${t}</option>`).join('')}</select>`;
+  if(TAB==='cansadas') h+=`<select id="fc"><option value="bajo2">Bajaron 2 veces o más</option><option value="18">Más de 18 meses publicadas</option><option value="12">Más de 1 año publicadas</option><option value="">Todas</option></select>
+     <select id="fo"><option value="bajas">Más bajas de precio primero</option><option value="dias">Más tiempo publicadas primero</option><option value="vs">Más caras vs. barrio primero</option></select>`;
+  if(TAB==='multi') h+=`<label><input type="checkbox" id="fEmp"> Mostrar emprendimientos (5+ inmobiliarias)</label>`;
+  if(TAB==='duenos') h+=`<button class="btn" id="bNuevo">+ Agregar dueño directo</button><button class="btn sec" id="bImp" title="Excel o CSV con columnas como: link, tipo, dirección, barrio, precio, moneda, dormitorios, m2, nombre, teléfono">Importar planilla</button>`;
+  $('bar').innerHTML=h;
+  ['q','ft','fe','fc','fo','fEmp'].forEach(i=>{const el=$(i); if(el) el.addEventListener(i==='q'?'input':'change',()=>{LIM=100;pintar()})});
+  if($('bNuevo')) $('bNuevo').onclick=()=>abrirForm(null);
+  if($('bImp')) $('bImp').onclick=()=>$('archivo').click();
+}
+$('archivo').onchange=async e=>{const f=e.target.files[0]; if(!f) return; e.target.value='';
+  const r=await (await fetch('/api/captacion/importar?nombre='+encodeURIComponent(f.name),{method:'POST',body:await f.arrayBuffer()})).json();
+  if(!r.ok) return toast('No se pudo leer: '+r.msg); toast(`Planilla: ${r.nuevos} nuevos, ${r.actualizados} actualizados`); await cargar()};
+
+function seg(clave){ return D.seguimiento[clave]||{estado:'por_contactar',resultado:'',notas:''} }
+function items(){
+  const q=norm($('q')?.value||''), ft=$('ft')?.value||'', fe=$('fe')?.value??'activas';
+  let L;
+  if(TAB==='duenos') L=D.duenos.map(d=>({...d,_clave:'d:'+d.id,_dueno:true}));
+  else if(TAB==='seguimiento'){ const todos={}; for(const k in D.senales) for(const f of D.senales[k]) todos['p:'+f.id]=todos['p:'+f.id]||{...f,_senal:k};
+    for(const d of D.duenos) todos['d:'+d.id]={...d,_dueno:true};
+    L=Object.keys(D.seguimiento).map(c=>todos[c]?{...todos[c],_clave:c}:null).filter(Boolean)
+      .sort((a,b)=>(D.seguimiento[b._clave].actualizado||'').localeCompare(D.seguimiento[a._clave].actualizado||'')); }
+  else L=D.senales[TAB].map(f=>({...f,_clave:'p:'+f.id,_senal:TAB}));
+  L=L.filter(f=>{ const s=seg(f._clave);
+    if(fe==='activas'&&s.estado==='descartada') return false; if(fe&&fe!=='activas'&&s.estado!==fe) return false;
+    if(ft&&(f.g||'')!==ft) return false;
+    if(q&&!norm([f.dir,f.direccion,f.b,f.barrio,f.inm,f.tipo,f.titulo,f.nombre,f.telefono,(f.otras||[]).map(o=>o.inm).join(' ')].join(' ')).includes(q)) return false;
+    if(TAB==='multi'&&f.emprend&&!$('fEmp').checked) return false;
+    return true });
+  if(TAB==='cansadas'){ const fc=$('fc').value, fo=$('fo').value;
+    const nb=f=>+(/bajó (\d+) veces/.exec(f.motivo)||[0,0])[1];
+    L=L.filter(f=>fc==='bajo2'?nb(f)>=2:fc?(f.dias||0)>=fc*30:true);
+    L.sort(fo==='bajas'?(a,b)=>nb(b)-nb(a)||(b.dias||0)-(a.dias||0):fo==='vs'?(a,b)=>(b.vs??-999)-(a.vs??-999):(a,b)=>(b.dias||0)-(a.dias||0)); }
+  return L;
+}
+function pintar(){
+  if(!D) return; const L=items();
+  if(!L.length){ $('lista').innerHTML=`<div class="vacio">${TAB==='duenos'?'Todavía no cargaste dueños directos. Tocá <b>+ Agregar dueño directo</b> o importá una planilla.':TAB==='seguimiento'?'Todavía no marcaste ninguna oportunidad.':TAB==='cambio'?'Todavía no hay casos: aparecen a medida que la app detecta bajas y nuevas publicaciones.':'Nada con estos filtros.'}</div>`; $('mas').innerHTML=''; return }
+  $('lista').innerHTML=L.slice(0,LIM).map(tarjeta).join('');
+  $('mas').innerHTML=L.length>LIM?`<button class="btn sec" onclick="LIM+=100;pintar()">Ver más (${L.length-LIM} restantes)</button>`:`<span class="mute">${L.length} en total</span>`;
+}
+function cmp(f){
+  const p=[]; if(f.um2) p.push(`USD ${fmt(f.um2)}/m²`);
+  if(f.vs!=null) p.push(`<b class="${f.vs>0?'up':'dn'}">${f.vs>0?'+':''}${f.vs}%</b> vs. mediana de ${esc(f.b||f.barrio)} (USD ${fmt(f.med)}/m², ${f.med_n} publicadas)`);
+  else if(f.med) p.push(`mediana de ${esc(f.b||f.barrio)}: USD ${fmt(f.med)}/m²`);
+  return p.length?`<div class="cmp">${p.join(' · ')}</div>`:'';
+}
+function wa(t){ let n=(t||'').replace(/\D/g,''); if(!n) return ''; if(n.startsWith('0')) n=n.slice(1); if(!n.startsWith('54')) n='549'+n.replace(/^(\d{3,4})15/,'$1'); return `https://wa.me/${n}` }
+function tarjeta(f){
+  const s=seg(f._clave), c=esc(f._clave);
+  let cuerpo;
+  if(f._dueno){
+    const ya=(f.en_inmobiliarias||[]);
+    cuerpo=`<div class="t">${esc(f.tipo||f.g||'')}${f.dorm!=null?` · ${f.dorm} dorm.`:''} · ${esc(f.direccion||'sin dirección')}${f.barrio?' · '+esc(f.barrio):''}</div>
+      <div><b>${f.precio?SIM(f.moneda)+' '+fmt(f.precio):'sin precio'}</b>${f.m2?` · ${fmt(f.m2)} m²`:''} · <span class="pill">${esc(f.origen||'Manual')}</span>${f.url?` <a href="${esc(f.url)}" target="_blank">ver aviso</a>`:''}</div>
+      ${cmp(f)}
+      ${ya.length?`<div class="warn">Ojo: ya la publica ${ya.map(o=>`<a href="${esc(o.url)}" target="_blank">${esc(o.inm||PLAT[o.f])}</a> (${SIM(o.moneda)} ${fmt(o.precio)})`).join(', ')}</div>`:''}
+      <div class="mute">${f.nombre?esc(f.nombre)+' · ':''}${f.telefono?`${esc(f.telefono)} ${wa(f.telefono)?`<a href="${wa(f.telefono)}" target="_blank">WhatsApp</a>`:''}`:''}${f.notas?' · '+esc(f.notas):''} · cargado ${esc((f.alta||'').slice(0,10))}
+       · <a href="#" onclick="abrirForm(${f.id});return false">editar</a> · <a href="#" onclick="borrarDueno(${f.id});return false">quitar</a></div>`;
+  } else {
+    cuerpo=`<div class="t">${esc(f.tipo)}${f.dorm!=null?` · ${f.dorm===0?'mono':f.dorm+' dorm.'}`:''} · ${esc(f.dir)}${f.b?' · '+esc(f.b):''}</div>
+      <div><b>${SIM(f.moneda)} ${fmt(f.precio)}</b>${f.m2?` · ${fmt(f.m2)} m²`:''} · ${esc(f.inm||'')} · <a href="${esc(f.url)}" target="_blank">ver aviso (${PLAT[f.f]||f.f})</a>${f.est==='baja'?` · <span class="pill">dada de baja ${esc(f.baja)}</span>`:''}${TAB==='seguimiento'?` · <span class="pill">${esc(TABS.find(t=>t[0]===f._senal)?.[1]||'')}</span>`:''}</div>
+      <div class="mot">${esc(f.motivo)}</div>${cmp(f)}
+      ${f.otras?`<div class="mute">Publicada por: ${f.otras.map(o=>`<a href="${esc(o.url)}" target="_blank">${esc(o.inm||PLAT[o.f])}</a> ${SIM(o.moneda)} ${fmt(o.precio)}`).join(' · ')}</div>`:''}
+      ${f.antes?`<div class="mute">Antes: <a href="${esc(f.antes.url)}" target="_blank">${esc(f.antes.inm)}</a> ${SIM(f.antes.moneda)} ${fmt(f.antes.precio)} (baja ${esc(f.antes.baja)})</div>`:''}`;
+  }
+  const venta=(f._senal==='bajas_largas'||f.est==='baja')?`<div style="margin-top:6px">¿Qué pasó? <button class="btn chico ${s.resultado==='vendida'?'':'sec'}" onclick="seguir('${c}',{resultado:'${s.resultado==='vendida'?'':'vendida'}'})">Se vendió</button> <button class="btn chico ${s.resultado==='no_vendida'?'':'sec'}" onclick="seguir('${c}',{resultado:'${s.resultado==='no_vendida'?'':'no_vendida'}'})">No se vendió</button></div>`:'';
+  return `<div class="card ${s.estado}"><div>${cuerpo}</div><div class="side">
+    <select onchange="seguir('${c}',{estado:this.value})">${ESTADOS.map(([k,t])=>`<option value="${k}"${s.estado===k?' selected':''}>${t}</option>`).join('')}</select>
+    <textarea placeholder="Notas (con quién hablaste, qué te dijo…)" onchange="seguir('${c}',{notas:this.value})">${esc(s.notas)}</textarea>${venta}
+    ${s.actualizado?`<div class="mute" style="font-size:11px">Actualizado ${esc(s.actualizado)}</div>`:''}</div></div>`;
+}
+async function seguir(clave,cambios){
+  const [t,id]=clave.split(':'); const body={clave,...cambios,senal:TAB}; if(t==='p') body.prop_id=+id; else body.dueno_id=+id;
+  await fetch('/api/captacion/seguir',{method:'POST',body:JSON.stringify(body)});
+  D.seguimiento[clave]={...seg(clave),...cambios,actualizado:new Date().toLocaleString('sv').slice(0,16)}; contar(); pintar();
+  if(cambios.resultado==='vendida') toast('Marcada como vendida: suma al Mapa de valores');
+}
+function abrirForm(id){ EDIT=id; const d=id?D.duenos.find(x=>x.id===id):{}; $('form').style.display='block';
+  const set=(i,v)=>$(i).value=v??''; set('fUrl',d.url); set('fTipo',d.tipo||'Casa'); set('fOp',d.operacion||'Venta'); set('fDir',d.direccion); set('fBarrio',d.barrio);
+  set('fDorm',d.dorm); set('fPrecio',d.precio); set('fMon',d.moneda||'USD'); set('fM2',d.m2); set('fTel',d.telefono); set('fNom',d.nombre); set('fNotas',d.notas); $('fUrl').focus(); scrollTo(0,0) }
+$('fCancelar').onclick=()=>{$('form').style.display='none'};
+$('fGuardar').onclick=async()=>{
+  const datos={url:$('fUrl').value,tipo:$('fTipo').value,operacion:$('fOp').value,direccion:$('fDir').value,barrio:$('fBarrio').value,dorm:$('fDorm').value,
+    precio:$('fPrecio').value,moneda:$('fMon').value,m2:$('fM2').value,telefono:$('fTel').value,nombre:$('fNom').value,notas:$('fNotas').value};
+  const r=await (await fetch('/api/captacion/dueno',{method:'POST',body:JSON.stringify(EDIT?{id:EDIT,datos}:{datos})})).json();
+  if(!r.ok) return toast(r.msg); $('form').style.display='none'; toast('Guardado'); await cargar() };
+async function borrarDueno(id){ if(!confirm('¿Quitar este dueño de la lista?')) return; await fetch('/api/captacion/dueno',{method:'POST',body:JSON.stringify({borrar:id})}); await cargar() }
+cargar().catch(e=>$('sub').textContent='No se pudo cargar: '+e);
+</script></body></html>
