@@ -414,6 +414,21 @@ def actualizar_dolar(cr: Corrida):
             cr.meta_set(db, "dolar", json.dumps(nuevo))
 
 
+# ================================================================== crédito UVA (una vez por día)
+def actualizar_credito_uva(cr: Corrida):
+    from app.scraper import credito
+    with Session(cr.eng) as db:
+        try:
+            anterior = json.loads(cr.meta_get(db, "credito") or "{}")
+        except ValueError:
+            anterior = {}
+    nuevo = credito.actualizar(anterior)
+    if nuevo:
+        with Session(cr.eng) as db, db.begin():
+            cr.meta_set(db, "credito", credito.a_json(nuevo))
+        cr.aviso(f"Crédito: UVA {((nuevo.get('uva') or {}).get('valor'))}, {len(nuevo.get('lineas') or [])} líneas")
+
+
 # ================================================================== corrida completa
 def correr(url: str, modo: str = "rapida", max_minutos: float = 11, solo: Iterable[str] = ("bbp", "ibb", "dolar")) -> dict:
     eng = engine_para(url_psycopg(url), pool_size=2, max_overflow=2, pool_pre_ping=True)
@@ -436,6 +451,10 @@ def correr(url: str, modo: str = "rapida", max_minutos: float = 11, solo: Iterab
         try:
             if "dolar" in solo:
                 actualizar_dolar(cr)
+                try:
+                    actualizar_credito_uva(cr)
+                except Exception as e:  # el crédito nunca frena la actualización de propiedades
+                    cr.aviso(f"Crédito: {type(e).__name__}: {e}")
             if "bbp" in solo:
                 actualizar_bbp(cr, (anterior, t_ahora))
             if "ibb" in solo:

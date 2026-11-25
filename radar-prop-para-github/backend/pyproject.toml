@@ -12,6 +12,11 @@ ignore = ["B008"]
 "app/scraper/texto.py" = ["E501"]
 "app/scraper/bbp.py" = ["E501"]
 "app/scraper/ibb.py" = ["E501"]
+"app/scraper/credito.py" = ["E501", "E741"]
+"app/services/catalogo.py" = ["E501"]
+"app/services/fichas_formato.py" = ["E501", "E731"]
+"tests/test_propiedades.py" = ["E501"]
+"app/services/sectores/*.py" = ["E501", "E731", "E741", "B023", "B007"]
 
 [tool.mypy]
 python_version = "3.12"

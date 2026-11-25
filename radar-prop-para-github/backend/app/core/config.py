@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     access_minutos: int = 15
     refresh_dias: int = 30
     cookie_secure: bool = True           # en desarrollo local por http: COOKIE_SECURE=false
+    cookie_path: str = "/auth"           # detrás del proxy de Netlify (/api/* → API): COOKIE_PATH=/api/auth
     login_max_intentos: int = 5
     bloqueo_minutos: int = 15
     auth_pedidos_por_minuto: int = 20    # límite por IP en /auth/*

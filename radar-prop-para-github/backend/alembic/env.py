@@ -6,7 +6,7 @@ from geoalchemy2 import alembic_helpers
 from sqlalchemy import pool
 
 from alembic import context
-from app.db_util import engine_para
+from app.db_util import engine_para, normalizar_url
 from app.models import Base
 
 config = context.config
@@ -17,7 +17,7 @@ target_metadata = Base.metadata
 
 def _url():
     if os.environ.get("DATABASE_URL"):
-        return os.environ["DATABASE_URL"]
+        return normalizar_url(os.environ["DATABASE_URL"])  # sin driver (como la da Supabase) -> psycopg
     from app.core.config import settings  # solo si no vino por variable de entorno
     return settings.database_url
 

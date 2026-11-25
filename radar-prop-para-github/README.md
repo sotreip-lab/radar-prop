@@ -2,7 +2,27 @@
 
 Sistema multiusuario de búsqueda de propiedades de Guillermo Badenheuer Inmobiliaria. Es el reemplazo de El Ojo de Dios: base central en la nube, uso desde el celular y la computadora, y varios usuarios a la vez.
 
-**Estado: Fase 2 (usuarios y seguridad) lista. Fase 1 (base y migración) cargada en Supabase.** La app vieja sigue funcionando igual en `Documents\BuscadorPropiedades`.
+**Estado: Fases 1 a 4 listas.** La app vieja sigue funcionando igual en `Documents\BuscadorPropiedades`.
+
+## Usar la app
+
+Entrá a **https://radar-prop.netlify.app** con tu usuario y contraseña (te los da el administrador desde la pantalla Equipo). La primera vez te pide cambiar la contraseña.
+
+**Instalarla con ícono propio**
+- **Android (Chrome):** menú ⋮ → *Instalar aplicación* (o *Agregar a la pantalla principal*).
+- **iPhone (Safari):** botón Compartir → *Agregar a inicio*.
+- **Windows (Chrome o Edge):** el ícono de instalar en la barra de direcciones (o menú → *Instalar Radar Prop*).
+
+**Qué hay en cada sección**
+- **Buscar**: los mismos filtros y el mismo semáforo que El Ojo de Dios (Verde ±USD 5.000, Violeta hasta +7%, Amarillo hasta +15%), pestañas por plataforma y buscador en toda la base.
+- **Mapa**: los resultados en el mapa; "Dibujar zona" (dos toques) o "Usar lo que se ve" para filtrar por zona.
+- **Selección**: lo que marcaste. Desde acá salen la ficha para el cliente (link con fotos), el texto para WhatsApp y el envío al panel.
+- **Historial**: tus búsquedas (con "Repetir búsqueda" y cuántas nuevas hay desde entonces), las propiedades que viste y las fichas que mandaste.
+- **Más**: Compradores y alertas, Crédito UVA, Mapa de valores, Captación, Excel por plataforma, Equipo (admin) y Mi cuenta.
+
+**Pasar tu selección de El Ojo de Dios**: en El Ojo de Dios tocá *Pasar mi selección a Radar Prop* (copia un código) y pegalo en Radar Prop → Mi cuenta → *Importar mi selección*.
+
+**Si algo falla**: si la app dice que no puede consultar el servidor, esperá un minuto (se está despertando). Más detalles en `docs/deploy.md`.
 
 ## Pasar los datos a Supabase (Fase 1)
 
@@ -31,4 +51,5 @@ Hacé doble clic en **Crear admin inicial.bat**. Muestra tu usuario (`bautista`)
   - Para validar contra los datos reales: `RADAR_SQLITE_REAL=.../propiedades.db RADAR_PG_REAL=... pytest tests/test_muestra_real.py`.
 - Linters: `ruff check . ../scripts` y `mypy app ../scripts/migrar_sqlite_a_postgres.py`.
 - `docker-compose.yml`: base PostGIS local más la API (`/health`).
-- Documentos: `docs/estado_actual.md`, `docs/mapeo_migracion.md` y `docs/api_fase2.md`.
+- Documentos: `docs/estado_actual.md`, `docs/mapeo_migracion.md`, `docs/api_fase2.md`, `docs/worker.md`, `docs/deploy.md` y `docs/costos.md`.
+- App web: `frontend/` (React + Vite + PWA). `npm run dev` (usa la API en el puerto 8000), `npm run lint`, `npm run typecheck`, `npm run test:e2e` (Playwright, celular 390×844 y PC 1440×900).

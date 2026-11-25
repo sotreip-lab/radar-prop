@@ -20,7 +20,7 @@ CREDENCIALES_MAL = "Usuario o contraseña incorrectos."
 
 def _poner_cookie(resp: Response, token: str):
     resp.set_cookie(COOKIE, token, max_age=settings.refresh_dias * 86400, httponly=True, secure=settings.cookie_secure,
-                    samesite="lax", path="/auth")
+                    samesite="lax", path=settings.cookie_path)
 
 
 def _salida(u: Usuario, s: Sesion) -> TokenOut:
@@ -98,7 +98,7 @@ def logout(request: Request, response: Response, a: Actual = Depends(usuario_log
     db.execute(update(Sesion).where(Sesion.id == a.sesion_id).values(revocada=True))
     registrar(db, a.id, "logout", "sesion", a.sesion_id, ip=ip_de(request))
     db.commit()
-    response.delete_cookie(COOKIE, path="/auth")
+    response.delete_cookie(COOKIE, path=settings.cookie_path)
 
 
 @router.post("/cambiar-password", response_model=TokenOut)

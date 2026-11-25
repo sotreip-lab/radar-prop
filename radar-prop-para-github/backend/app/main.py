@@ -10,14 +10,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from app.api import admin_usuarios, auth, me, selecciones
+from app.api import admin_usuarios, auth, clientes, eventos, fichas, historial, me, propiedades, sectores, selecciones
 from app.core.config import settings
 from app.db import engine
 
 log = logging.getLogger("radar")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-app = FastAPI(title="Radar Prop", version="0.2.0", docs_url="/docs", redoc_url=None)
+app = FastAPI(title="Radar Prop", version="0.4.0", docs_url="/docs", redoc_url=None)
 app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_origin], allow_credentials=True,
                    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
                    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"])
@@ -25,6 +25,10 @@ app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_origin], all
 
 @app.middleware("http")
 async def registro(request: Request, call_next):
+    # La app web llama a /api/... (Netlify reenvía /api/* a este servidor): se atiende igual que sin el prefijo.
+    ruta = request.scope.get("path", "")
+    if ruta == "/api" or ruta.startswith("/api/"):
+        request.scope["path"] = ruta[4:] or "/"
     rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
     t = time.perf_counter()
     respuesta = await call_next(request)
@@ -79,3 +83,11 @@ app.include_router(auth.router)
 app.include_router(me.router)
 app.include_router(admin_usuarios.router)
 app.include_router(selecciones.router)
+app.include_router(propiedades.router)
+app.include_router(fichas.router)
+app.include_router(fichas.publico)
+app.include_router(historial.router)
+app.include_router(historial.guardadas)
+app.include_router(clientes.router)
+app.include_router(sectores.router)
+app.include_router(eventos.router)

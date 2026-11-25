@@ -5,11 +5,11 @@ from collections.abc import Iterator
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
-from app.db_util import engine_para
+from app.db_util import engine_para, normalizar_url
 
 
 def crear_engine(url: str | None = None):
-    url = url or os.environ.get("DATABASE_URL") or settings.database_url
+    url = normalizar_url(url or os.environ.get("DATABASE_URL") or settings.database_url)  # la de Supabase viene sin driver
     kw: dict = {}
     if "+psycopg" in url:
         kw["connect_args"] = {"options": f"-c statement_timeout={settings.db_statement_timeout_ms}"}
