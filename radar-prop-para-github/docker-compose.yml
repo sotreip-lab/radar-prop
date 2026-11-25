@@ -1,0 +1,32 @@
+# Desarrollo local: base PostGIS + API. El worker (Fase 3) y el frontend (Fase 4) se suman después.
+# En producción la base es la de Supabase: se usa DATABASE_URL del .env y no se levanta el servicio "db".
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: radar
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-radar_local}
+      POSTGRES_DB: radar
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U radar"]
+      interval: 5s
+      retries: 10
+
+  migraciones:
+    build: ./backend
+    command: alembic upgrade head
+    env_file: .env
+    depends_on:
+      db: {condition: service_healthy}
+
+  api:
+    build: ./backend
+    env_file: .env
+    ports: ["8000:8000"]
+    depends_on:
+      migraciones: {condition: service_completed_successfully}
+
+volumes:
+  pgdata:
