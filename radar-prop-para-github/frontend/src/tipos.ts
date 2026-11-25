@@ -11,8 +11,8 @@ export type Filtros = {
 
 export const FILTROS_INICIALES: Filtros = {
   mon: "USD", b: 0, pct_abajo: 15, rojas: false, pmin: 0, pmax: 0, oper: "Venta", ciudad: "Bahía Blanca", tipos: [], barrios: [],
-  sin_barrio: false, dorm: "", dorm_modo: "exacto", banos: 0, supmin: 0, patio: "", cochera: "", pileta: "", balcon: "", parrilla: "",
-  amoblado: "", credito: "", estrenar: false, kw: "", nuevas_horas: 0, margen: 0, sin_dato: false, sin_ubic: false, excl: true,
+  sin_barrio: true, dorm: "", dorm_modo: "exacto", banos: 0, supmin: 0, patio: "", cochera: "", pileta: "", balcon: "", parrilla: "",
+  amoblado: "", credito: "", estrenar: false, kw: "", nuevas_horas: 0, margen: 300, sin_dato: true, sin_ubic: false, excl: true,
   bajas: false, bajo_precio: false, margen_neg: false, dmin: null, dmax: null, m2max: 0, bajo_min: 0, cuota_max: 0,
   plataforma: "todas", qg: "", solo_seleccion: false, orden: "", orden_dir: 1,
 };
@@ -39,7 +39,11 @@ export type Resultado = {
   colores: Record<string, number>; sin_ubic_ocultas: number; actualizado: string; resumen: string;
 };
 
-export type Linea = { banco: string; linea: string; tea: number; beneficiario: string; rci: number; ltv: number; plazo: number; monto_max: number; ingreso_min?: number; nota?: string; destino?: string };
+export type Linea = {
+  banco: string; linea: string; tea: number; beneficiario: string; rci: number; ltv: number; plazo: number; destino?: string; es_banco?: boolean;
+  monto_max: number | null; monto_max_uva?: number | null; valor_max_uva?: number | null; valor_min_uva?: number | null; monto_min?: number | null;
+  ingreso_min?: number | null; tna?: number; cft?: number | null; requisitos?: string[]; nota?: string;
+};
 export type Credito = { uva: { valor: number; fecha: string } | null; lineas: Linea[]; plazo_anios: number; dolar: { valor?: number; tipo?: string }; linea_defecto: Linea | null; lineas_leidas: string };
 
 export type Estado = {

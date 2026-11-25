@@ -25,6 +25,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from app.scraper.red import ahora_local
+from app.services.credito_lineas import condiciones, simular
 
 PLAT_NOM = {"BBP": "Bahía Blanca Propiedades", "IBB": "IBB", "ZP": "ZonaProp"}
 PLAT_CORTO = {"BBP": "BBP", "IBB": "IBB", "ZP": "ZONAPROP"}
@@ -218,12 +219,17 @@ def lineas_viv(cred: dict) -> list[dict]:
     return [ln for ln in (cred or {}).get("lineas", []) if ln.get("destino") == "Vivienda única"]
 
 
-def linea_defecto(cred: dict) -> dict | None:
+def candidatas(cred: dict) -> list[dict]:
+    """Líneas de uso general (no exclusivas de empleados públicos), de la más barata a la más cara."""
     viv = lineas_viv(cred)
     cand = [ln for ln in viv if ln.get("es_banco") is not False and BENEF_GRAL.search(ln.get("beneficiario") or "")
             and not re.search(r"públic", ln.get("beneficiario") or "", re.I)
             and not re.search(r"p[uú]blico", ln.get("linea") or "", re.I) and ln.get("ltv", 100) <= 80]
-    lista = sorted(cand or viv, key=lambda ln: ln["tea"])
+    return sorted(cand or viv, key=lambda ln: ln["tea"])
+
+
+def linea_defecto(cred: dict) -> dict | None:
+    lista = candidatas(cred)
     return lista[0] if lista else None
 
 
@@ -235,23 +241,23 @@ def precio_pesos(o: dict, dolar: float) -> float | None:
     return o["precio"] * dolar if dolar else None
 
 
-def calc_cuota(o: dict, ln: dict, cred: dict, dolar: float, anios: int | None = None, ltv: float | None = None) -> dict | None:
+def calc_cuota(o: dict, ln: dict | list[dict], cred: dict, dolar: float, anios: int | None = None,
+               ltv: float | None = None) -> dict | None:
+    """Simula con la línea dada. Con una lista, usa la más barata para la que la propiedad califica (o None)."""
     pp = precio_pesos(o, dolar)
     if not pp or not ln:
         return None
-    anios = min(anios or cred.get("plazo_anios", 20), math.floor(ln["plazo"] / 12))
-    ltv = min(ltv or ln["ltv"], ln["ltv"])
-    prestamo = pp * ltv / 100
-    if ln.get("monto_max") and prestamo > ln["monto_max"]:
-        prestamo = ln["monto_max"]
-    n = anios * 12
-    i = (1 + ln["tea"] / 100) ** (1 / 12) - 1
-    cuota = prestamo * i / (1 - (1 + i) ** -n)
     uva = (cred.get("uva") or {}).get("valor")
-    return {"cuota": cuota, "prestamo": prestamo, "anios": anios, "ltv": round(prestamo / pp * 100), "pp": pp,
-            "anticipo": pp - prestamo, "ingreso": max(cuota / (ln["rci"] / 100), ln.get("ingreso_min") or 0),
-            "cuota_uva": cuota / uva if uva else None, "uvas": prestamo / uva if uva else None, "total": cuota * n,
-            "linea": {k: ln.get(k) for k in ("banco", "linea", "tea", "beneficiario", "rci", "ltv", "plazo", "monto_max", "nota")}}
+    plazo = anios or cred.get("plazo_anios", 20)
+    for x in ln if isinstance(ln, list) else [ln]:
+        r = simular(pp, x, uva, plazo, ltv)
+        if r and (r["califica"] or not isinstance(ln, list)):
+            return {**r, "linea": _linea_corta(x)}
+    return None
+
+
+def _linea_corta(ln: dict) -> dict:
+    return {k: ln.get(k) for k in ("banco", "linea", "tea", "beneficiario", "rci", "ltv", "plazo", "monto_max", "nota")}
 
 
 # ------------------------------------------------------------------ filtros
@@ -353,6 +359,7 @@ class Catalogo:
         self.ultima = ""
         self.excluidas = [norm(x) for x in INMOBILIARIAS_EXCLUIDAS]
         self.ldef: dict | None = None
+        self.lcand: list[dict] = []
 
     # -------------------------------------------------------------- carga
     def _version_actual(self, c) -> str:
@@ -400,7 +407,9 @@ class Catalogo:
             data.append(self._fila(r, hist.get(r["id"], [])))
         self.data = data
         self.por_id = {o["id"]: o for o in data}
-        self.ldef = linea_defecto(self.credito)
+        self.credito["lineas"] = [condiciones(x) for x in self.credito.get("lineas") or []]
+        self.lcand = candidatas(self.credito)
+        self.ldef = self.lcand[0] if self.lcand else None
         self._analisis()
 
     def _fila(self, r, hist) -> dict:
@@ -524,7 +533,7 @@ class Catalogo:
             o["_baja_pct"] = (1 - o["precio"] / max_p) * 100 if o["precio"] and max_p > o["precio"] else 0.0
             if (o["operacion"] == "Venta" and re.match(r"^Sí", o["apto_credito"] or "") and TIPO_VIV.search(o["tipo"] or "")
                     and self.ldef):
-                o["_cuota"] = calc_cuota(o, self.ldef, self.credito, dv)
+                o["_cuota"] = calc_cuota(o, self.lcand, self.credito, dv)
             mas_barata = bool(o["_otros_precios"] and any(x["precio"] < o["precio"] for x in o["_otros_precios"]))
             o["_margen"] = ("alto" if ((o["_dias_exacto"] and o["_dias"] >= 365) or o["_bajas"] >= 2 or o["_baja_pct"] >= 8)
                             else "medio" if ((o["_dias_exacto"] and o["_dias"] >= 180) or o["_bajas"] >= 1 or mas_barata) else "")

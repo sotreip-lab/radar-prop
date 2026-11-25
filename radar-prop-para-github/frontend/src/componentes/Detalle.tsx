@@ -1,11 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect } from "react";
 import { api } from "../api";
 import { copiar, fmt, PLAT_CORTO, PLAT_NOM, sim } from "../formato";
 import { useCredito, useSeleccion } from "../hooks";
-import type { Linea } from "../tipos";
 import { useToast } from "../toast";
 import { IcoCerrar } from "./Iconos";
+import SimCredito from "./SimCredito";
 
 type D = Record<string, unknown> & {
   id: number; fuente: string; url: string; titulo: string; tipo: string | null; operacion: string; direccion: string | null; barrio: string | null;
@@ -19,57 +19,14 @@ type D = Record<string, unknown> & {
   precio_falso: number | null;
 };
 
-export function calcCuota(precioPesos: number, l: Linea, anios: number, ltv: number, uva?: number) {
-  anios = Math.min(anios, Math.floor(l.plazo / 12));
-  ltv = Math.min(ltv || l.ltv, l.ltv);
-  let prestamo = (precioPesos * ltv) / 100;
-  if (l.monto_max && prestamo > l.monto_max) prestamo = l.monto_max;
-  const n = anios * 12, i = Math.pow(1 + l.tea / 100, 1 / 12) - 1, cuota = (prestamo * i) / (1 - Math.pow(1 + i, -n));
-  return {
-    cuota, prestamo, anios, ltv: Math.round((prestamo / precioPesos) * 100), anticipo: precioPesos - prestamo,
-    ingreso: Math.max(cuota / (l.rci / 100), l.ingreso_min || 0), cuotaUva: uva ? cuota / uva : null, uvas: uva ? prestamo / uva : null,
-  };
-}
-
 function Credito({ d }: { d: D }) {
   const c = useCredito();
-  const lineas = useMemo(() => c.data?.lineas || [], [c.data]);
-  const def = c.data?.linea_defecto;
-  const [idx, setIdx] = useState(-1);
-  const [anios, setAnios] = useState(20);
-  const [ltv, setLtv] = useState(0);
-  useEffect(() => { if (def && idx < 0) { setIdx(Math.max(0, lineas.findIndex((l) => l.banco === def.banco && l.linea === def.linea && l.tea === def.tea))); setAnios(c.data?.plazo_anios || 20); } }, [def, lineas, idx, c.data]);
-  if (!c.data || !lineas.length || idx < 0) return null;
-  const dolar = c.data.dolar?.valor || 0;
+  const dolar = c.data?.dolar?.valor || 0;
   const pp = d.moneda === "ARS" ? ((d.precio || 0) >= 15e6 ? d.precio : null) : d.precio && dolar ? d.precio * dolar : null;
   if (!pp) return null;
-  const l = lineas[idx];
-  const r = calcCuota(pp, l, anios, ltv || l.ltv, c.data.uva?.valor);
-  const S = (v: number) => (d.moneda === "USD" && dolar ? `$ ${fmt(v)} (USD ${fmt(v / dolar)})` : `$ ${fmt(v)}`);
-  const apto = /^Sí/.test(d.apto_credito || "");
   return (
     <section className="det-sec">
-      <h3>Crédito hipotecario UVA {!apto && <span className="chico" style={{ color: "var(--amarillo)" }}>· el aviso no dice que sea apto crédito</span>}</h3>
-      <div className="grid-form">
-        <label className="campo"><span>Línea</span>
-          <select value={idx} onChange={(e) => setIdx(+e.target.value)}>
-            {lineas.map((x, i) => <option key={i} value={i}>{x.banco} · {x.linea} · TEA {String(x.tea).replace(".", ",")}% · {x.beneficiario}</option>)}
-          </select></label>
-        <label className="campo"><span>Plazo</span>
-          <select value={anios} onChange={(e) => setAnios(+e.target.value)}>
-            {[10, 15, 20, 25, 30].map((a) => <option key={a} value={a} disabled={a > Math.floor(l.plazo / 12)}>{a} años</option>)}
-          </select></label>
-        <label className="campo"><span>Financia (%) — máximo {l.ltv}</span>
-          <input type="number" min={10} max={100} step={5} value={ltv || ""} placeholder={`${l.ltv}`} onChange={(e) => setLtv(+e.target.value || 0)} /></label>
-      </div>
-      <div className="cred-grid">
-        <div><span className="suave chico">Cuota inicial</span><b className="num">$ {fmt(r.cuota)}/mes</b>{r.cuotaUva ? <small>{r.cuotaUva.toFixed(1).replace(".", ",")} UVAs fijas</small> : null}</div>
-        <div><span className="suave chico">Préstamo ({r.ltv}%)</span><b className="num">{S(r.prestamo)}</b></div>
-        <div><span className="suave chico">Anticipo que necesita</span><b className="num">{S(r.anticipo)}</b><small>más gastos de escritura</small></div>
-        <div><span className="suave chico">Ingreso mínimo del hogar</span><b className="num">$ {fmt(r.ingreso)}/mes</b><small>la cuota no puede pasar el {l.rci}% del ingreso</small></div>
-      </div>
-      {l.monto_max && r.prestamo >= l.monto_max - 1 ? <p style={{ color: "var(--amarillo)" }}>Tope de la línea: $ {fmt(l.monto_max)}. El resto va al anticipo.</p> : null}
-      <p className="suave chico">Tasas del BCRA (régimen de transparencia{c.data.lineas_leidas ? `, leídas ${c.data.lineas_leidas}` : ""}) · UVA $ {fmt(c.data.uva?.valor)} · dólar {c.data.dolar?.tipo || ""} $ {fmt(dolar)}. La cuota es la inicial: en pesos se ajusta por UVA. Es una estimación: el banco define el monto al evaluar al cliente. No incluye gastos de escritura ni seguros.</p>
+      <SimCredito precioPesos={pp} moneda={d.moneda} titulo={d.titulo} direccion={d.direccion} aptoCredito={d.apto_credito} />
     </section>
   );
 }

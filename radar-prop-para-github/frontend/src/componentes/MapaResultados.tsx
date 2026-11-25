@@ -15,8 +15,9 @@ function zonaDeLimites(b: L.LatLngBounds): Zona {
 }
 
 /** Mapa con los resultados. Con muchos puntos y poco zoom se agrupan (círculo con la cantidad). */
-export default function MapaResultados({ puntos, sinUbic, ocultas, abrir, marcar }: {
+export default function MapaResultados({ puntos, sinUbic, ocultas, abrir, marcar, pc = false }: {
   puntos: Punto[]; sinUbic: number; ocultas: number; abrir: (id: number) => void; marcar: (id: number) => void;
+  /** true = herramientas con el diseño de la PC (El Ojo de Dios) */ pc?: boolean;
 }) {
   const div = useRef<HTMLDivElement>(null);
   const mapa = useRef<L.Map | null>(null);
@@ -25,7 +26,7 @@ export default function MapaResultados({ puntos, sinUbic, ocultas, abrir, marcar
   const [dibujando, setDibujando] = useState(false);
   const esquina = useRef<L.LatLng | null>(null);
   const guia = useRef<L.Rectangle | null>(null);
-  const { zona, setZona } = useBusqueda();
+  const { zona, setZona, filtros, cambiar } = useBusqueda();
   const [zoom, setZoom] = useState(13);
   const ajustado = useRef(false);
   const abrirRef = useRef(abrir);
@@ -121,9 +122,9 @@ export default function MapaResultados({ puntos, sinUbic, ocultas, abrir, marcar
           const d = document.createElement("div");
           d.innerHTML = `<b>${precio ? `${sim(moneda)} ${fmt(precio)}` : "Consultar"}</b>${color ? ` · ${color}` : ""}${z === "dentro" ? " · en la zona" : z === "cerca" ? " · cerca de la zona" : ""}<br>`;
           const ver = document.createElement("button");
-          ver.className = "btn chico"; ver.textContent = "Ver detalle"; ver.onclick = () => { m.closePopup(); abrirRef.current(id); };
+          ver.className = pc ? "c-btn" : "btn chico"; ver.textContent = "Ver detalle"; ver.onclick = () => { m.closePopup(); abrirRef.current(id); };
           const mar = document.createElement("button");
-          mar.className = "btn sec chico"; mar.style.marginLeft = "6px"; mar.textContent = sel ? "Desmarcar" : "Marcar"; mar.onclick = () => { m.closePopup(); marcarRef.current(id); };
+          mar.className = pc ? "c-btn c-sec" : "btn sec chico"; mar.style.marginLeft = "6px"; mar.textContent = sel ? "Desmarcar" : "Marcar"; mar.onclick = () => { m.closePopup(); marcarRef.current(id); };
           d.append(ver, mar);
           return d;
         });
@@ -136,9 +137,33 @@ export default function MapaResultados({ puntos, sinUbic, ocultas, abrir, marcar
       const med = (a: number[]) => a.sort((x, y) => x - y)[a.length >> 1];
       if (!zona) m.setView([med(puntos.map((p) => p[1])), med(puntos.map((p) => p[2]))], puntos.length > 300 ? 13 : 14);
     }
-  }, [puntos, zoom, zona]);
+  }, [puntos, zoom, zona, pc]);
 
   const dentro = puntos.filter((p) => p[4] === "dentro").length, cerca = puntos.filter((p) => p[4] === "cerca").length;
+  if (pc) {
+    return (
+      <div>
+        <div className="c-maptools">
+          <button type="button" className={`c-btn c-mdibujar${dibujando ? " c-on" : ""}`} title="Tocá el botón y arrastrá el mouse sobre el mapa para dibujar el cuadrado" onClick={() => setDibujando(!dibujando)}>▭ Dibujar cuadrado</button>
+          <button type="button" className="c-btn c-sec" title="Usa como zona lo que se ve ahora en el mapa" onClick={() => mapa.current && setZona(zonaDeLimites(mapa.current.getBounds()))}>Usar lo que se ve</button>
+          <button type="button" className="c-btn c-sec" onClick={() => setZona(null)}>Borrar zona</button>
+          <label className="c-f" style={{ margin: 0 }}>Cercanías</label>
+          <select style={{ width: "auto" }} value={filtros.margen} onChange={(e) => cambiar("margen", +e.target.value)}>
+            <option value={0}>Solo adentro</option><option value={200}>+ 200 m</option><option value={300}>+ 300 m</option><option value={500}>+ 500 m</option><option value={1000}>+ 1 km</option>
+          </select>
+          <label className="c-chk" style={{ margin: 0 }}><input type="checkbox" checked={filtros.sin_ubic} onChange={(e) => cambiar("sin_ubic", e.target.checked)} /> Incluir avisos sin ubicación</label>
+          <span className="c-mute">
+            {dibujando ? "Arrastrá el mouse sobre el mapa (o tocá dos esquinas)."
+              : zona ? `${dentro} adentro · ${cerca} cerca${ocultas ? ` · ${ocultas} sin ubicación no se muestran` : ""}`
+                : `${puntos.length.toLocaleString("es-AR")} en el mapa${sinUbic ? ` · ${sinUbic.toLocaleString("es-AR")} sin ubicación` : ""}`}
+          </span>
+        </div>
+        {zona && <div className="c-mute" style={{ margin: "-2px 0 8px", fontSize: 12.5 }}>
+          <span className="c-dot" style={{ background: "#16a34a" }} /><b>Adentro del cuadrado</b> &nbsp; <span className="c-dot" style={{ background: "#f59e0b" }} /><b>Cerca</b> (dentro del margen de cercanía) &nbsp;·&nbsp; Los filtros de la izquierda (precio, dormitorios, etc.) también se aplican.</div>}
+        <div ref={div} className="c-map" style={dibujando ? { cursor: "crosshair" } : undefined} role="application" aria-label="Mapa de resultados" />
+      </div>
+    );
+  }
   return (
     <div className={dibujando ? "dibujando" : ""}>
       <div className="mapa-herr">

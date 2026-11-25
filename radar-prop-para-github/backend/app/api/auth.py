@@ -10,7 +10,7 @@ from app.core.deps import Actual, ip_de, limite_auth, usuario_logueado
 from app.core.security import crear_access_token, hash_password, hash_refresh, nuevo_refresh, password_valida, verificar_password
 from app.db import get_db
 from app.models import Sesion, Usuario
-from app.schemas.usuarios import CambiarPasswordIn, LoginIn, TokenOut, UsuarioOut
+from app.schemas.usuarios import CambiarPasswordIn, LoginIn, SolicitudAccesoIn, TokenOut, UsuarioOut
 from app.services.auditoria import registrar
 
 router = APIRouter(prefix="/auth", tags=["auth"], dependencies=[Depends(limite_auth)])
@@ -42,6 +42,8 @@ def login(datos: LoginIn, request: Request, response: Response, db: Session = De
     if u.bloqueado_hasta and u.bloqueado_hasta > ahora:
         minutos = int((u.bloqueado_hasta - ahora).total_seconds() // 60) + 1
         raise HTTPException(423, f"Demasiados intentos fallidos. Probá de nuevo en {minutos} minutos.")
+    if u.solicitud_pendiente and verificar_password(u.hash_password, datos.password):
+        raise HTTPException(403, "Tu solicitud todavía no fue aprobada. Cuando el administrador la apruebe vas a poder ingresar.")
     if not verificar_password(u.hash_password, datos.password) or not u.activo:
         if u.activo:
             u.intentos_fallidos += 1
@@ -64,6 +66,26 @@ def login(datos: LoginIn, request: Request, response: Response, db: Session = De
     db.commit()
     _poner_cookie(response, token)
     return _salida(u, s)
+
+
+@router.post("/solicitar-acceso", status_code=201)
+def solicitar_acceso(datos: SolicitudAccesoIn, request: Request, db: Session = Depends(get_db)):
+    """Cualquiera puede pedir un usuario: queda desactivado y pendiente hasta que un admin lo apruebe en Equipo."""
+    for campo, valor, msj in ((Usuario.usuario, datos.usuario, "Ese nombre de usuario ya está tomado. Elegí otro."),
+                              (Usuario.email, datos.email, "Ya hay un usuario con ese email.")):
+        if valor and db.scalar(select(Usuario.id).where(func.lower(campo) == valor.strip().lower()).limit(1)):
+            raise HTTPException(409, msj)
+    motivo = password_valida(datos.password)
+    if motivo:
+        raise HTTPException(400, motivo)
+    u = Usuario(nombre=datos.nombre.strip(), apellido=(datos.apellido or "").strip(), usuario=datos.usuario.strip(),
+                email=datos.email, telefono=datos.telefono, rol="agente", hash_password=hash_password(datos.password),
+                debe_cambiar_password=False, activo=False, solicitud_pendiente=True)
+    db.add(u)
+    db.flush()
+    registrar(db, u.id, "solicitud_acceso", "usuario", u.id, {"usuario": u.usuario}, ip_de(request))
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/refresh", response_model=TokenOut)

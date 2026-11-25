@@ -16,11 +16,11 @@ import { useToast } from "../toast";
 const ORDENES: [string, string][] = [["", "Semáforo"], ["precio", "Precio"], ["dif", "Diferencia con el presupuesto"], ["usdm2", "Precio por m²"],
   ["detectada", "Fecha de publicación"], ["vsb", "m² contra el barrio"], ["dormitorios", "Dormitorios"], ["sup_cub", "m² cubiertos"]];
 
-function cuerpo(filtros: Filtros, zona: Zona | null, extra: object = {}) {
+export function cuerpo(filtros: Filtros, zona: Zona | null, extra: object = {}) {
   return { filtros, zona, ...extra };
 }
 
-async function exportarCSV(filtros: Filtros, zona: Zona | null, total: number, toast: (t: string) => void) {
+export async function exportarCSV(filtros: Filtros, zona: Zona | null, total: number, toast: (t: string) => void) {
   // Mismo formato de "Exportar" de El Ojo de Dios (separado por ; para Excel en español)
   toast(`Armando la planilla con ${total} propiedades…`);
   const filas: Item[] = [];

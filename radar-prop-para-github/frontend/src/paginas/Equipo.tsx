@@ -4,7 +4,7 @@ import { api, type Usuario } from "../api";
 import { copiar, fechaHora } from "../formato";
 import { useToast } from "../toast";
 
-type U = Usuario & { creado_en: string; ultimo_ingreso: string | null };
+type U = Usuario & { creado_en: string; ultimo_ingreso: string | null; solicitud_pendiente?: boolean };
 type Creado = { usuario: U; password_temporal: string; texto_whatsapp: string; link_whatsapp: string | null };
 type Form = { nombre: string; apellido: string; usuario: string; email: string; telefono: string; rol: "admin" | "agente" };
 
@@ -60,23 +60,42 @@ export default function Equipo() {
   const qc = useQueryClient();
   const toast = useToast();
   const accion = useMutation({
-    mutationFn: ({ u, a }: { u: U; a: "desactivar" | "reactivar" | "resetear-password" | "cerrar" }) =>
+    mutationFn: ({ u, a }: { u: U; a: "desactivar" | "reactivar" | "resetear-password" | "cerrar" | "aprobar" | "rechazar" }) =>
       a === "cerrar" ? api(`/admin/usuarios/${u.id}/sesiones`, { method: "DELETE" }) : api<U | Creado>(`/admin/usuarios/${u.id}/${a}`, { method: "POST" }),
     onSuccess: (r, v) => {
       qc.invalidateQueries({ queryKey: ["usuarios"] });
+      qc.invalidateQueries({ queryKey: ["solicitudes"] });
       if (v.a === "resetear-password") setClave(r as Creado);
-      else toast(v.a === "cerrar" ? "Se cerraron sus sesiones" : v.a === "desactivar" ? `${v.u.nombre} ya no puede entrar` : `${v.u.nombre} puede volver a entrar`);
+      else toast({ cerrar: "Se cerraron sus sesiones", desactivar: `${v.u.nombre} ya no puede entrar`, reactivar: `${v.u.nombre} puede volver a entrar`,
+        aprobar: `Listo: ${v.u.nombre} ya puede ingresar`, rechazar: `Solicitud de ${v.u.nombre} rechazada` }[v.a]);
     },
     onError: (e) => toast((e as Error).message),
   });
+  const pendientes = q.data?.filter((u) => u.solicitud_pendiente) ?? [];
+  const resto = q.data?.filter((u) => !u.solicitud_pendiente) ?? [];
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <div className="fila-flex"><h2 className="crece" style={{ margin: 0 }}>Equipo</h2><button className="btn" onClick={() => setEditar("nuevo")}>Nuevo usuario</button></div>
       <p className="suave" style={{ margin: 0 }}>Los usuarios no se borran: se desactivan, y su historial queda.</p>
       {q.isLoading && <div className="esqueleto" style={{ height: 80 }} />}
       {q.isError && <div className="aviso error">{(q.error as Error).message}</div>}
+      {pendientes.length > 0 && (
+        <section className="solicitudes" aria-label="Solicitudes de acceso">
+          <h3>{pendientes.length === 1 ? "1 persona pide acceso" : `${pendientes.length} personas piden acceso`}</h3>
+          {pendientes.map((u) => (
+            <div key={u.id} className="fila-flex">
+              <div className="crece">
+                <b>{u.nombre} {u.apellido}</b> <span className="suave">({u.usuario})</span>
+                <div className="suave chico">{[u.telefono, u.email].filter(Boolean).join(" · ") || "Sin teléfono ni email"} · pidió el {fechaHora(u.creado_en)}</div>
+              </div>
+              <button className="btn sec chico" onClick={() => confirm(`¿Rechazar el pedido de ${u.nombre}? Se borra la solicitud.`) && accion.mutate({ u, a: "rechazar" })}>Rechazar</button>
+              <button className="btn chico" onClick={() => accion.mutate({ u, a: "aprobar" })}>Aprobar</button>
+            </div>
+          ))}
+        </section>
+      )}
       <div className="filas">
-        {q.data?.map((u) => (
+        {resto.map((u) => (
           <div key={u.id} className="fila-flex" style={u.activo ? undefined : { opacity: 0.6 }}>
             <div className="crece">
               <b>{u.nombre} {u.apellido}</b> <span className="suave">({u.usuario})</span> · {u.rol === "admin" ? "Administrador" : "Agente"}{!u.activo && " · desactivado"}

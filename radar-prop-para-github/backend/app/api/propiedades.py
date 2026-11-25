@@ -63,7 +63,8 @@ class FiltrosIn(BaseModel):
     qg: str = Field("", max_length=500)
     solo_ids: list[int] | None = Field(None, max_length=5000)
     solo_seleccion: bool = False
-    orden: Literal["", "color", "precio", "dif", "usdm2", "detectada", "vsb", "dormitorios", "sup_cub", "tipo", "barrio"] = ""
+    orden: Literal["", "color", "precio", "dif", "usdm2", "detectada", "vsb", "dormitorios", "sup_cub", "tipo", "barrio",
+                   "fuente", "direccion", "antiguedad", "inmobiliaria"] = ""
     orden_dir: int = 1
 
 

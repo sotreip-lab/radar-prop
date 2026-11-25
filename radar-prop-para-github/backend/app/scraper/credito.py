@@ -88,7 +88,7 @@ def _leer_lineas():
              "beneficiario": x.get("beneficiario") or "", "tea": tea, "tipo_tasa": x.get("tipoTasa") or "",
              "plazo": plazo, "ltv": ltv, "rci": rci, "monto_max": float(x.get("montoMaximoOtorgable") or 0),
              "ingreso_min": float(x.get("ingresoMinimoMensual") or 0), "cft": x.get("costoFinancieroEfectivoTotalMaximo"),
-             "fecha": x.get("fechaInformacion") or "", "nota": (x.get("masInformacion") or "")[:300]}
+             "fecha": x.get("fechaInformacion") or "", "nota": (x.get("masInformacion") or "")[:600]}
         k = (l["banco"], l["linea"], l["destino"], l["beneficiario"], l["tea"], l["plazo"], l["ltv"])
         if k in vistos:
             continue

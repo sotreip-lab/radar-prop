@@ -4,7 +4,7 @@ import re
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -55,7 +55,40 @@ def _cerrar_sesiones(db: Session, uid: int):
 
 @router.get("/usuarios", response_model=list[UsuarioOut])
 def listar(a: Actual = Depends(solo_admin), db: Session = Depends(get_db)):
-    return db.scalars(select(Usuario).order_by(Usuario.activo.desc(), Usuario.nombre)).all()
+    return db.scalars(select(Usuario).order_by(Usuario.solicitud_pendiente.desc(), Usuario.activo.desc(),
+                                               Usuario.nombre)).all()
+
+
+@router.get("/solicitudes-pendientes")
+def pendientes(a: Actual = Depends(solo_admin), db: Session = Depends(get_db)):
+    return {"cantidad": db.scalar(select(func.count()).where(Usuario.solicitud_pendiente.is_(True))) or 0}
+
+
+@router.post("/usuarios/{uid}/aprobar", response_model=UsuarioOut)
+def aprobar(uid: int, request: Request, a: Actual = Depends(solo_admin), db: Session = Depends(get_db)):
+    u = _usuario(db, uid)
+    if not u.solicitud_pendiente:
+        raise HTTPException(400, "Ese usuario no tiene una solicitud pendiente.")
+    u.solicitud_pendiente = False
+    u.activo = True
+    u.creado_por = a.id
+    registrar(db, a.id, "aprobar_solicitud", "usuario", uid, {"usuario": u.usuario}, ip_de(request))
+    db.commit()
+    return u
+
+
+@router.post("/usuarios/{uid}/rechazar", status_code=204)
+def rechazar(uid: int, request: Request, a: Actual = Depends(solo_admin), db: Session = Depends(get_db)):
+    """Una solicitud rechazada se borra (nunca llegó a usar la app), así el nombre de usuario queda libre."""
+    u = _usuario(db, uid)
+    if not u.solicitud_pendiente:
+        raise HTTPException(400, "Ese usuario no tiene una solicitud pendiente.")
+    datos = {"usuario": u.usuario, "nombre": f"{u.nombre} {u.apellido}".strip()}
+    db.execute(update(Actividad).where(Actividad.user_id == uid).values(user_id=None))
+    db.execute(delete(Sesion).where(Sesion.user_id == uid))
+    db.delete(u)
+    registrar(db, a.id, "rechazar_solicitud", "usuario", uid, datos, ip_de(request))
+    db.commit()
 
 
 @router.post("/usuarios", response_model=UsuarioCreadoOut, status_code=201)
@@ -115,6 +148,7 @@ def desactivar(uid: int, request: Request, a: Actual = Depends(solo_admin), db: 
 def reactivar(uid: int, request: Request, a: Actual = Depends(solo_admin), db: Session = Depends(get_db)):
     u = _usuario(db, uid)
     u.activo = True
+    u.solicitud_pendiente = False
     u.intentos_fallidos = 0
     u.bloqueado_hasta = None
     registrar(db, a.id, "reactivar_usuario", "usuario", uid, ip=ip_de(request))

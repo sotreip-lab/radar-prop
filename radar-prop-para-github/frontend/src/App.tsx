@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { api } from "./api";
 import { IcoBuscar, IcoCaptar, IcoCredito, IcoEquipo, IcoHist, IcoMapa, IcoMas, IcoPersonas, IcoSel, IcoValores } from "./componentes/Iconos";
@@ -16,7 +16,21 @@ import Ingreso from "./paginas/Ingreso";
 import Mas from "./paginas/Mas";
 import Sector from "./paginas/Sector";
 import Seleccion from "./paginas/Seleccion";
+import Escritorio from "./escritorio/Escritorio";
 import { useSesion } from "./sesion";
+
+/** PC (pantalla ancha): diseño de El Ojo de Dios. Celular y tablet: diseño de Radar Prop. */
+function useEsPC() {
+  const q = "(min-width: 1000px)";
+  const [es, setEs] = useState(() => window.matchMedia(q).matches);
+  useEffect(() => {
+    const m = window.matchMedia(q);
+    const f = () => setEs(m.matches);
+    m.addEventListener("change", f);
+    return () => m.removeEventListener("change", f);
+  }, []);
+  return es;
+}
 
 type Notif = { total: number; compradores: { cliente_id: number; nombre: string; cantidad: number }[] };
 
@@ -50,7 +64,12 @@ function Dentro() {
   const sel = useSeleccion();
   const notif = Avisos();
   const admin = s.usuario?.rol === "admin";
+  // Solicitudes de acceso esperando aprobación: globo en Equipo (solo admin).
+  const pq = useQuery({ queryKey: ["solicitudes"], queryFn: () => api<{ cantidad: number }>("/admin/solicitudes-pendientes"), enabled: admin, refetchInterval: 120_000 });
+  const pend = admin ? pq.data?.cantidad ?? 0 : 0;
   const act = est.data?.actualizado;
+  const esPC = useEsPC();
+  if (esPC) return <Escritorio notif={notif} pend={pend} />;
   const enlaces = [
     { a: "/", t: "Buscar", i: <IcoBuscar />, fin: true },
     { a: "/mapa", t: "Mapa", i: <IcoMapa /> },
@@ -78,7 +97,7 @@ function Dentro() {
         <NavLink to="/mapa-de-valores" className={({ isActive }) => (isActive ? "activo" : "")}><IcoValores />Mapa de valores</NavLink>
         <NavLink to="/captacion" className={({ isActive }) => (isActive ? "activo" : "")}><IcoCaptar />Captación</NavLink>
         <hr />
-        {admin && <NavLink to="/equipo" className={({ isActive }) => (isActive ? "activo" : "")}><IcoEquipo />Equipo</NavLink>}
+        {admin && <NavLink to="/equipo" className={({ isActive }) => (isActive ? "activo" : "")}><IcoEquipo />Equipo{pend ? <span className="globo">{pend}</span> : null}</NavLink>}
         <NavLink to="/cuenta" className={({ isActive }) => (isActive ? "activo" : "")}><IcoEquipo />Mi cuenta</NavLink>
       </nav>
       <main className="contenido">
@@ -95,7 +114,7 @@ function Dentro() {
           <Route path="/captacion" element={<Sector cual="captacion" />} />
           <Route path="/equipo" element={admin ? <Equipo /> : <Navigate to="/" />} />
           <Route path="/cuenta" element={<Cuenta />} />
-          <Route path="/mas" element={<Mas notif={notif} />} />
+          <Route path="/mas" element={<Mas notif={notif} pend={pend} />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </main>
@@ -105,7 +124,7 @@ function Dentro() {
             {e.i}<span>{e.t}</span>{e.n ? <span className="globo">{e.n}</span> : null}
           </NavLink>
         ))}
-        <NavLink to="/mas" className={({ isActive }) => (isActive ? "activo" : "")}><IcoMas /><span>Más</span>{notif ? <span className="globo">{notif}</span> : null}</NavLink>
+        <NavLink to="/mas" className={({ isActive }) => (isActive ? "activo" : "")}><IcoMas /><span>Más</span>{notif + pend ? <span className="globo">{notif + pend}</span> : null}</NavLink>
       </nav>
     </div>
   );

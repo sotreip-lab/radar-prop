@@ -35,6 +35,7 @@ class UsuarioOut(BaseModel):
     telefono: str | None
     rol: str
     activo: bool
+    solicitud_pendiente: bool = False
     debe_cambiar_password: bool
     creado_en: datetime
     ultimo_ingreso: datetime | None
@@ -54,6 +55,17 @@ class UsuarioCrearIn(BaseModel):
     email: str | None = Field(None, max_length=160, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     telefono: str | None = Field(None, max_length=40)
     rol: Rol = "agente"
+
+    _limpiar = field_validator("email", "telefono", mode="before")(lambda v: _limpio(v))
+
+
+class SolicitudAccesoIn(BaseModel):
+    nombre: str = Field(min_length=1, max_length=80)
+    apellido: str = Field("", max_length=80)
+    usuario: str = Field(min_length=3, max_length=60, pattern=r"^[A-Za-z0-9._-]+$")
+    email: str | None = Field(None, max_length=160, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    telefono: str | None = Field(None, max_length=40)
+    password: str = Field(min_length=1, max_length=200)
 
     _limpiar = field_validator("email", "telefono", mode="before")(lambda v: _limpio(v))
 

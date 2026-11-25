@@ -47,6 +47,7 @@ class Usuario(Base):
     hash_password: Mapped[str] = mapped_column(Text)
     debe_cambiar_password: Mapped[bool] = mapped_column(Boolean, default=True)
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
+    solicitud_pendiente: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     intentos_fallidos: Mapped[int] = mapped_column(Integer, default=0)
     bloqueado_hasta: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     creado_por: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))

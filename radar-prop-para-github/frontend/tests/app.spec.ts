@@ -8,7 +8,7 @@ async function entrar(page: Page) {
   await page.getByLabel("Usuario o email").fill(USUARIO);
   await page.getByLabel("Contraseña").fill(CLAVE);
   await page.getByRole("button", { name: "Ingresar" }).click();
-  await expect(page.getByText("Última actualización")).toBeVisible();
+  await expect(page.getByText(/Última actualización|Revisado:/).first()).toBeVisible();
 }
 
 test("ingreso con contraseña incorrecta muestra el error", async ({ page }) => {
@@ -20,6 +20,7 @@ test("ingreso con contraseña incorrecta muestra el error", async ({ page }) => 
 });
 
 test("búsqueda con semáforo, detalle y selección con ficha", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "la PC tiene el diseño de El Ojo de Dios: se prueba en pc.spec.ts");
   await entrar(page);
   await page.goto("/seleccion");
   await expect(page.getByText(/marcadas?$|Todavía no marcaste/).first()).toBeVisible();
@@ -45,7 +46,8 @@ test("búsqueda con semáforo, detalle y selección con ficha", async ({ page, i
   await expect(page.getByText("Todavía no marcaste propiedades")).toBeVisible();
 });
 
-test("mapa con puntos y zona", async ({ page }) => {
+test("mapa con puntos y zona", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "la PC tiene el diseño de El Ojo de Dios: se prueba en pc.spec.ts");
   await entrar(page);
   await page.goto("/mapa");
   await expect(page.getByText(/en el mapa/)).toBeVisible();
@@ -74,4 +76,31 @@ test("alta de usuario desde Equipo", async ({ page }) => {
   await expect(page.getByText("Se muestra una sola vez")).toBeVisible();
   await page.getByRole("button", { name: "Listo, ya la pasé" }).click();
   await expect(page.getByText(`(${n})`)).toBeVisible();
+});
+
+test("pedir acceso, aprobar desde Equipo e ingresar", async ({ page, browser }) => {
+  const n = `pide${Date.now() % 100000}`;
+  await page.goto("/");
+  await page.getByRole("button", { name: "Pedir acceso" }).click();
+  await page.getByLabel("Nombre").fill("Carla");
+  await page.getByLabel("Usuario para ingresar").fill(n);
+  await page.getByLabel("Contraseña", { exact: true }).fill("Carla2026x");
+  await page.getByLabel("Repetí la contraseña").fill("Carla2026x");
+  await page.getByRole("button", { name: "Enviar solicitud" }).click();
+  await expect(page.getByText("Solicitud enviada")).toBeVisible();
+  await page.getByRole("button", { name: "Volver al ingreso" }).click();
+  await page.getByLabel("Contraseña").fill("Carla2026x");
+  await page.getByRole("button", { name: "Ingresar" }).click();
+  await expect(page.getByRole("alert")).toContainText("todavía no fue aprobada");
+
+  const adm = await browser.newPage();
+  await entrar(adm);
+  await adm.goto("/equipo");
+  const pedido = adm.locator(".solicitudes .fila-flex", { hasText: `(${n})` });
+  await pedido.getByRole("button", { name: "Aprobar" }).click();
+  await expect(adm.getByText(`(${n})`)).toBeVisible();
+  await expect(adm.locator(".solicitudes .fila-flex", { hasText: `(${n})` })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Ingresar" }).click();
+  await expect(page.getByText(/Última actualización|Revisado:/).first()).toBeVisible();
 });

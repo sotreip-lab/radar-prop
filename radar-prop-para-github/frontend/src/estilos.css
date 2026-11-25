@@ -254,3 +254,25 @@ textarea { min-height: 90px; resize: vertical; }
 @media (max-width: 999px) { .solo-pc { display: none !important; } }
 .res.sin-foto { grid-template-columns: 6px minmax(0, 1fr); }
 .res.sin-foto .cuerpo { padding-left: 6px; }
+.ingreso .tarjeta-ingreso { width: min(400px, 100%); background: var(--sup); border-radius: 16px; padding: 26px 22px; display: grid; gap: 14px; }
+.ingreso h2 { font-size: 19px; }
+.ingreso .dos-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.solicitudes { border: 2px solid var(--radar); border-radius: 12px; padding: 12px; display: grid; gap: 10px; }
+.solicitudes h3 { margin: 0; font-size: 16px; }
+/* Simulador de crédito (celular y página Crédito) */
+.cred-sim { display: grid; gap: 8px; }
+.cred-tit { font-weight: 700; font-size: 16px; }
+.cred-aviso { color: var(--amarillo); font-weight: 600; font-size: 13px; }
+.cred-ctrl { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cred-ctrl > select { flex: 1 1 100%; min-width: 0; }
+.cred-par { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+.cred-par input { width: 70px; }
+.cred-par input.cred-ing { width: 120px; }
+.cred-estado { border-radius: 8px; padding: 7px 10px; font-size: 14px; font-weight: 600; }
+.cred-estado.ok { background: var(--ok-fondo); color: #1d6b38; }
+.cred-estado.no { background: var(--error-fondo); color: #a3352e; }
+.cred-grid small { display: block; color: var(--suave); font-size: 12px; }
+.cred-datos { font-size: 13px; color: var(--texto); }
+.cred-req { margin: 0; padding-left: 18px; font-size: 13px; }
+.cred-nota { font-size: 12px; color: var(--suave); }
+.cred-pie { display: grid; gap: 6px; font-size: 12px; justify-items: start; }

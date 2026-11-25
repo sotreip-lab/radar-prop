@@ -17,7 +17,7 @@ async function bajarExcel(fuente: string, toast: (t: string) => void) {
   }
 }
 
-export default function Mas({ notif }: { notif: number }) {
+export default function Mas({ notif, pend = 0 }: { notif: number; pend?: number }) {
   const s = useSesion();
   const toast = useToast();
   return (
@@ -27,7 +27,7 @@ export default function Mas({ notif }: { notif: number }) {
         <Link to="/credito" className="fila-flex" style={{ textDecoration: "none", color: "inherit" }}><IcoCredito className="ico" /><span className="crece">Crédito UVA</span></Link>
         <Link to="/mapa-de-valores" className="fila-flex" style={{ textDecoration: "none", color: "inherit" }}><IcoValores className="ico" /><span className="crece">Mapa de valores (m² por zona)</span></Link>
         <Link to="/captacion" className="fila-flex" style={{ textDecoration: "none", color: "inherit" }}><IcoCaptar className="ico" /><span className="crece">Captación</span></Link>
-        {s.usuario?.rol === "admin" && <Link to="/equipo" className="fila-flex" style={{ textDecoration: "none", color: "inherit" }}><IcoEquipo className="ico" /><span className="crece">Equipo</span></Link>}
+        {s.usuario?.rol === "admin" && <Link to="/equipo" className="fila-flex" style={{ textDecoration: "none", color: "inherit" }}><IcoEquipo className="ico" /><span className="crece">Equipo</span>{pend ? <span className="tag nueva">{pend} {pend === 1 ? "solicitud" : "solicitudes"}</span> : null}</Link>}
         <Link to="/cuenta" className="fila-flex" style={{ textDecoration: "none", color: "inherit" }}><IcoEquipo className="ico" /><span className="crece">Mi cuenta</span></Link>
       </div>
       <div className="tarjeta" style={{ display: "grid", gap: 8 }}>
