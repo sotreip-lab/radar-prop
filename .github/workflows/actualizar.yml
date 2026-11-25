@@ -1,0 +1,40 @@
+# Lee Bahía Blanca Propiedades e IBB cada 15 minutos y actualiza la base (Supabase).
+# Necesita el secreto DATABASE_URL (Settings → Secrets and variables → Actions).
+name: Actualizar propiedades
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: "rapida (lo de siempre) o completa (vuelve a leer todas las fichas)"
+        type: choice
+        options: [rapida, completa]
+        default: rapida
+concurrency:
+  group: actualizar-propiedades
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    defaults:
+      run:
+        working-directory: radar-prop-para-github/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: radar-prop-para-github/backend/requirements-worker.txt
+      - name: Instalar
+        run: pip install --quiet -r requirements-worker.txt
+      - name: Actualizar
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then echo "::error::Falta el secreto DATABASE_URL"; exit 1; fi
+          python -m worker.actualizar --modo "${{ inputs.modo || 'rapida' }}" --max-minutos 11
