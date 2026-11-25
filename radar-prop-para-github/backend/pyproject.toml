@@ -7,6 +7,12 @@ extend-exclude = ["alembic/versions"]
 select = ["E", "F", "W", "I", "B", "UP"]
 ignore = ["B008"]
 
+[tool.ruff.lint.per-file-ignores]
+# copia textual de las reglas de El Ojo de Dios: no se reformatea para poder compararla con la app vieja
+"app/scraper/texto.py" = ["E501"]
+"app/scraper/bbp.py" = ["E501"]
+"app/scraper/ibb.py" = ["E501"]
+
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true
