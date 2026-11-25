@@ -1,0 +1,22 @@
+# Prueba única: ¿los sitios dejan leer desde los servidores de GitHub? (no usa ninguna clave)
+name: Prueba de acceso a los sitios
+on:
+  workflow_dispatch:
+  push:
+    paths: [".github/workflows/prueba-sitios.yml"]
+jobs:
+  probar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Probar Bahía Blanca Propiedades e IBB
+        run: |
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"
+          probar() { r=$(curl -s -o /tmp/r -w "%{http_code} %{size_download} %{time_total}" -A "$UA" -L --max-time 120 "$1"); echo "$r  $1"; head -c 300 /tmp/r | tr -d '\n' | cut -c1-200; echo; }
+          probar https://www.bahiablancapropiedades.com/sitemap.xml
+          probar https://www.bahiablancapropiedades.com/propiedad/95448/
+          probar https://www.bahiablancapropiedades.com/
+          probar "https://ibb.com.ar/search?listing_type=selling&category=&city=&view=list"
+          probar https://ibb.com.ar/
+          probar https://dolarapi.com/v1/dolares/bolsa
+          probar "https://api.bcra.gob.ar/estadisticas/v4.0/monetarias/31"
