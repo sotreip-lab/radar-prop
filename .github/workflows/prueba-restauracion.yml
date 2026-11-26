@@ -1,0 +1,94 @@
+# Fase 5: prueba de restauración. Toma el último respaldo diario, lo descifra y lo restaura en una base de prueba
+# nueva (vacía, solo existe mientras corre esto). Después compara cuántas filas tiene cada tabla contra la base real.
+# Corre solo el día 1 de cada mes y también se puede lanzar a mano. No toca la base real (solo la lee para comparar).
+name: Prueba de restauración
+on:
+  schedule:
+    - cron: "41 7 1 * *"   # día 1 de cada mes, 04:41 en Bahía Blanca
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  restaurar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      prueba:
+        image: postgis/postgis:17-3.5
+        env:
+          POSTGRES_PASSWORD: prueba
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 20
+    steps:
+      - name: Bajar el último respaldo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN=$(gh run list --repo "${{ github.repository }}" --workflow respaldo.yml --status success --limit 1 --json databaseId,createdAt -q '.[0].databaseId')
+          [ -n "$RUN" ] || { echo "::error::No hay respaldos todavía"; exit 1; }
+          gh run download "$RUN" --repo "${{ github.repository }}" --dir respaldo
+          F=$(find respaldo -name '*.dump.gpg' | head -1)
+          echo "Respaldo: $F"
+          echo "ARCHIVO=$F" >> "$GITHUB_ENV"
+      - name: Descifrar
+        env:
+          BACKUP_CLAVE: ${{ secrets.BACKUP_CLAVE }}
+        run: gpg --batch --pinentry-mode loopback --passphrase "$BACKUP_CLAVE" -d -o radar.dump "$ARCHIVO"
+      - name: Instalar herramientas de PostgreSQL 17
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSo /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-17 > /dev/null
+          pip install --quiet "psycopg[binary]"
+      - name: Preparar la base de prueba igual que la real (PostGIS en el mismo esquema)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          PGPASSWORD: prueba
+        run: |
+          set -euo pipefail
+          ESQ=$(python -c "import os,re,psycopg;u=re.sub(r'^postgres(ql)?(\+\w+)?://','postgresql://',os.environ['DATABASE_URL'].strip());print(psycopg.connect(u).execute(\"SELECT n.nspname FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace WHERE e.extname='postgis'\").fetchone()[0])")
+          echo "PostGIS en la base real: esquema $ESQ"
+          B=/usr/lib/postgresql/17/bin
+          $B/psql -h localhost -U postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE prueba TEMPLATE template0" postgres
+          $B/psql -h localhost -U postgres -v ON_ERROR_STOP=1 prueba -c "CREATE SCHEMA IF NOT EXISTS \"$ESQ\"; CREATE EXTENSION postgis SCHEMA \"$ESQ\"; ALTER DATABASE prueba SET search_path = public, \"$ESQ\";"
+      - name: Restaurar en la base de prueba
+        env:
+          PGPASSWORD: prueba
+        run: |
+          B=/usr/lib/postgresql/17/bin
+          $B/pg_restore -h localhost -U postgres -d prueba --no-owner --no-privileges radar.dump 2> errores.txt && echo "Restaurado sin errores" || {
+            echo "::warning::pg_restore avisó $(grep -c 'error' errores.txt) errores (detalle abajo); la comparación decide si sirve"; head -20 errores.txt; }
+      - name: Comparar contra la base real
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python - <<'PY'
+          import os, re, sys, psycopg
+          real = re.sub(r"^postgres(ql)?(\+\w+)?://", "postgresql://", os.environ["DATABASE_URL"].strip())
+          prueba = "postgresql://postgres:prueba@localhost:5432/prueba"
+          tablas = ["propiedades", "historial_precios", "usuarios", "clientes", "fichas_generadas", "busquedas", "propiedades_vistas", "meta"]
+          def contar(url):
+              out = {}
+              with psycopg.connect(url) as c:
+                  for t in tablas:
+                      try:
+                          out[t] = c.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]
+                      except Exception:
+                          c.rollback(); out[t] = None
+              return out
+          a, b = contar(prueba), contar(real)
+          filas = [f"| {t} | {a[t]} | {b[t]} |" for t in tablas if a[t] is not None or b[t] is not None]
+          ok = (a.get("propiedades") or 0) >= 0.95 * (b.get("propiedades") or 0) > 0
+          txt = "\n".join([f"## Prueba de restauración — {'APROBADA ✅' if ok else 'NO APROBADA ❌'}", "",
+                           "La base real sigue cambiando después del respaldo, así que puede tener algunas filas más.", "",
+                           "| Tabla | Restaurada | Real hoy |", "|---|---|---|", *filas])
+          print(txt)
+          open(os.environ["GITHUB_STEP_SUMMARY"], "a").write(txt + "\n")
+          sys.exit(0 if ok else 1)
+          PY
+      - name: Borrar copias locales
+        if: always()
+        run: rm -f radar.dump errores.txt; rm -rf respaldo

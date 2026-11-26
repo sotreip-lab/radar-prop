@@ -1,0 +1,44 @@
+# Fase 5: prueba de uso simultáneo. 10 usuarios de prueba buscan, abren propiedades, miran el mapa, guardan
+# historial y generan fichas durante 5 minutos, con el actualizador corriendo al mismo tiempo.
+# Se lanza a mano: Actions → Prueba de carga → Run workflow. Los usuarios de prueba se borran solos al final.
+name: Prueba de carga
+on:
+  workflow_dispatch:
+    inputs:
+      minutos:
+        description: "Minutos de prueba"
+        default: "5"
+      usuarios:
+        description: "Usuarios a la vez"
+        default: "10"
+permissions:
+  contents: read
+  actions: write
+jobs:
+  carga:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: radar-prop-para-github/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar
+        run: pip install --quiet httpx "psycopg[binary]" argon2-cffi
+      - name: Arrancar el actualizador en paralelo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run actualizar.yml --repo "${{ github.repository }}" || echo "::warning::No pude lanzar el actualizador"
+      - name: Prueba de carga
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python carga/prueba_carga.py --url https://radar-prop.netlify.app/api --minutos "${{ inputs.minutos }}" --usuarios "${{ inputs.usuarios }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: resultado-carga
+          path: radar-prop-para-github/backend/resultado_carga.json
+          if-no-files-found: ignore
