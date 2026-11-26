@@ -32,7 +32,7 @@ def url_pg() -> str:
 
 def crear_usuarios(n: int) -> tuple[list[int], str]:
     clave = secrets.token_urlsafe(24)
-    h = PasswordHasher().hash(clave)
+    h = PasswordHasher(time_cost=2, memory_cost=19 * 1024, parallelism=1).hash(clave)  # como los usuarios nuevos
     ids = []
     with psycopg.connect(url_pg()) as c:
         borrar_usuarios(c)  # por si quedaron de una corrida cortada
