@@ -43,7 +43,7 @@ class FiltrosIn(BaseModel):
     balcon: SiNo = ""
     parrilla: SiNo = ""
     amoblado: SiNo = ""
-    credito: Literal["", "si"] = ""
+    credito: Literal["", "si", "si_nc"] = ""
     estrenar: bool = False
     kw: str = Field("", max_length=200)
     nuevas_horas: int = Field(0, ge=0, le=24 * 365)
