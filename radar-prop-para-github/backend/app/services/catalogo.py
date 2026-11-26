@@ -366,8 +366,9 @@ class Catalogo:
     # -------------------------------------------------------------- carga
     def _version_actual(self, c) -> str:
         r = c.execute(text("SELECT (SELECT valor FROM meta WHERE clave='ultima_actualizacion'), "
-                           "(SELECT COUNT(*) FROM propiedades), (SELECT MAX(actualizado_en) FROM propiedades)")).first()
-        return f"{r[0]}|{r[1]}|{r[2]}"
+                           "(SELECT COUNT(*) FROM propiedades), (SELECT MAX(actualizado_en) FROM propiedades), "
+                           "(SELECT md5(string_agg(valor, '|' ORDER BY clave)) FROM meta WHERE clave IN ('credito', 'dolar'))")).first()
+        return f"{r[0]}|{r[1]}|{r[2]}|{r[3]}"
 
     def asegurar(self) -> Catalogo:
         if self.data and time.monotonic() - self.revisado < self.refresco_seg:
@@ -719,6 +720,10 @@ class Catalogo:
         if F.credito:
             v = o["apto_credito"] or "No confirmado"
             if v.startswith("No (") or v == "No":
+                return None
+            # "si": solo las que el aviso (o su descripción / la IA) confirma como aptas crédito.
+            # "si_nc": además las que no dicen nada (van en amarillo), como hacía El Ojo de Dios.
+            if v == "No confirmado" and F.credito == "si":
                 return None
             if v == "No confirmado":
                 amarillo = True
