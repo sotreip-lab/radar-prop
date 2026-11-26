@@ -7,7 +7,6 @@
 Los dueños directos y el seguimiento viven en la base central (captacion_duenos, captacion_seguimiento).
 """
 import re
-from datetime import datetime
 
 from app.scraper.red import ahora_local
 from app.services.sectores import comun
@@ -18,7 +17,7 @@ ESTADOS = ("por_contactar", "contactado", "captada", "descartada")
 def _dias(a, b=None):
     try:
         b = b or ahora_local().strftime("%Y-%m-%d")
-        return (datetime.strptime(b[:10], "%Y-%m-%d") - datetime.strptime(a[:10], "%Y-%m-%d")).days
+        return (comun.dia(b[:10]) - comun.dia(a[:10])).days
     except Exception:
         return None
 

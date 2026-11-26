@@ -1,10 +1,12 @@
 """Herramientas compartidas por los sectores aparte (copia de modulos/comun.py de El Ojo de Dios)."""
 import re
 from collections import Counter
+from functools import lru_cache
 
 from app.core.texto import sin_marcas
 
 
+@lru_cache(maxsize=1 << 16)  # los mismos barrios, tipos y direcciones se repiten miles de veces
 def norm(s):
     return sin_marcas(s or "").lower().strip()
 
@@ -22,6 +24,7 @@ GRUPOS_TIPO = [
 ]
 
 
+@lru_cache(maxsize=4096)
 def grupo_tipo(tipo):
     t = norm(tipo)
     if t.startswith("casa con local"):
@@ -32,6 +35,7 @@ def grupo_tipo(tipo):
     return "Otros"
 
 
+@lru_cache(maxsize=1 << 15)
 def clave_direccion(direccion):
     """'Zapiola 1473, Centro' -> 'zapiola1473' (vacío si no tiene número)."""
     d = re.sub(r"[^a-z0-9]", "", norm((direccion or "").split(",")[0]))
@@ -135,3 +139,10 @@ def inm_clave(nombre):
     t = re.sub(r"[^a-z0-9 ]", " ", norm(nombre))
     t = _INM_RUIDO.sub(" ", t).split()
     return " ".join(t[:2]) if t else norm(nombre)
+
+
+@lru_cache(maxsize=4096)
+def dia(f):
+    """strptime de 'AAAA-MM-DD', una vez por fecha distinta."""
+    from datetime import datetime
+    return datetime.strptime(f, "%Y-%m-%d")

@@ -11,7 +11,6 @@ Y queda "en observación" mientras no pasen N días desde la baja (config: merca
 porque en ese tiempo todavía puede reaparecer.
 Si en Captación la marcás como "Se vendió", cuenta como cierre confirmado."""
 import re
-from datetime import datetime
 
 from app.scraper.red import ahora_local
 from app.services.sectores import comun, zonas
@@ -21,7 +20,7 @@ VENDIDA_RE = re.compile(r"\b(vendid[oa]|reservad[oa]|señad[oa])\b", re.I)
 
 def _dias(a, b):
     try:
-        return (datetime.strptime(b[:10], "%Y-%m-%d") - datetime.strptime(a[:10], "%Y-%m-%d")).days
+        return (comun.dia(b[:10]) - comun.dia(a[:10])).days
     except Exception:
         return None
 
@@ -142,9 +141,12 @@ def _suavizar(puntos, k=15, vueltas=3):
         for p in puntos:
             gi, gj = int(p[0] / T), int(p[1] / T)
             cand = [puntos[i] for a in (-1, 0, 1) for b in (-1, 0, 1) for i in grilla.get((gi + a, gj + b), ())]
-            cand.sort(key=lambda q: (q[0] - p[0]) ** 2 + ((q[1] - p[1]) * 0.78) ** 2)
+            x0, y0 = p[0], p[1]
+            dist = [(q[0] - x0) ** 2 + ((q[1] - y0) * 0.78) ** 2 for q in cand]
+            # mismo orden que ordenar cand por distancia (orden estable), pero sin llamar a una función por cada par
+            cerca = [cand[i] for i in sorted(range(len(cand)), key=dist.__getitem__)[:k]]
             votos = {}
-            for j, q in enumerate(cand[:k]):
+            for j, q in enumerate(cerca):
                 votos[q[2]] = votos.get(q[2], 0) + (1.5 if j == 0 else 1)
             nuevo.append([p[0], p[1], max(votos.items(), key=lambda x: x[1])[0]])
         puntos = nuevo
