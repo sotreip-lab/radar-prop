@@ -53,6 +53,9 @@ def _actual(db: Session, authorization: str | None) -> Actual:
     # se revisa en cada pedido: un usuario desactivado o una sesión cerrada dejan de andar al instante
     if not u or not u.activo or not s or s.revocada or s.user_id != u.id:
         raise NO_AUTORIZADO
+    # devuelve la conexión al pool mientras el pedido hace lo suyo (buscar, calcular): así unos pocos pedidos lentos
+    # no dejan a los demás esperando una conexión libre
+    db.commit()
     return Actual(usuario=u, sesion_id=s.id)
 
 

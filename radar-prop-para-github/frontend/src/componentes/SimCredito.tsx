@@ -22,7 +22,17 @@ export default function SimCredito({ precioPesos, moneda, titulo, direccion, apt
   const [ingreso, setIngreso] = useState(0);
   useEffect(() => { if (lineas.length) setIdx(lineaSugerida(precioPesos, lineas, uva, c.data?.plazo_anios || 20)); }, [lineas, precioPesos, uva, c.data?.plazo_anios]);
   const evals = useMemo(() => lineas.map((l) => simular(precioPesos, l, uva, anios)), [lineas, precioPesos, uva, anios]);
-  if (!c.data || !lineas.length || idx < 0 || !precioPesos) return null;
+  if (!precioPesos) return null;
+  if (c.isLoading || (c.data && lineas.length && idx < 0)) return <div className={k("cred-sim")}>{mostrarTitulo && <div className={k("cred-tit")}>Crédito hipotecario UVA</div>}<span className={pc ? "c-mute" : "suave"}>Cargando las tasas del BCRA…</span></div>;
+  if (c.isError || !c.data || !lineas.length) {
+    return (
+      <div className={k("cred-sim")}>
+        {mostrarTitulo && <div className={k("cred-tit")}>Crédito hipotecario UVA</div>}
+        <span className={pc ? "c-mute" : "suave"}>{c.isError ? "No se pudieron traer las tasas de crédito del servidor. " : "Todavía no hay tasas del BCRA cargadas. "}</span>
+        <button type="button" className={pc ? "c-btn c-sec" : "btn sec chico"} onClick={() => c.refetch()}>Reintentar</button>
+      </div>
+    );
+  }
   const l = lineas[Math.min(idx, lineas.length - 1)];
   const r = simular(precioPesos, l, uva, anios, ltv || l.ltv);
   const S = (v: number) => (moneda === "USD" && dolar ? <>$ {fmt(v)} <span className={pc ? "c-mute" : "suave"}>(USD {fmt(v / dolar)})</span></> : <>$ {fmt(v)}</>);

@@ -18,7 +18,6 @@ import os
 import re
 import threading
 import time
-import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -26,6 +25,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from app.core.texto import sin_marcas
 from app.scraper.red import ahora_local
 from app.services.credito_lineas import condiciones, simular
 
@@ -39,8 +39,7 @@ BENEF_GRAL = re.compile(r"todos|sueldo|dependencia|cuenta", re.I)
 
 
 def norm(s: Any) -> str:
-    s = unicodedata.normalize("NFD", str(s or ""))
-    return "".join(c for c in s if unicodedata.category(c) != "Mn").lower()
+    return sin_marcas(str(s or "")).lower()
 
 
 def js_round(x: float) -> int:
@@ -376,11 +375,11 @@ class Catalogo:
         with self.lock:
             if self.data and time.monotonic() - self.revisado < self.refresco_seg:
                 return self
+            crudo = None
             with self.engine.connect() as c:
                 v = self._version_actual(c)
                 if not self.data:
-                    self._cargar(c)
-                    self.version = v
+                    crudo = self._leer(c)
                 elif v != self.version:
                     if RECARGA_EN_FONDO:
                         # Hay datos nuevos (pasó el actualizador): se cargan aparte y se cambian de una vez.
@@ -389,8 +388,10 @@ class Catalogo:
                             self.recargando = True
                             threading.Thread(target=_recargar_en_fondo, args=(self, v), daemon=True).start()
                     else:
-                        self._cargar(c)
-                        self.version = v
+                        crudo = self._leer(c)
+            if crudo is not None:
+                self._procesar(*crudo)
+                self.version = v
             self.revisado = time.monotonic()
         return self
 
@@ -399,7 +400,16 @@ class Catalogo:
         self.version = ""
 
     def _cargar(self, c):
+        self._procesar(*self._leer(c))
+
+    def _leer(self, c):
+        """Solo lee de la base (rápido); el procesamiento se hace después, ya sin ocupar una conexión."""
         meta = dict(c.execute(text("SELECT clave, valor FROM meta")).all())
+        hist_filas = c.execute(text("SELECT propiedad_id, fecha, precio_anterior, precio FROM historial_precios ORDER BY fecha")).all()
+        filas = c.execute(text(SQL_PROPS)).mappings().all()
+        return meta, hist_filas, filas
+
+    def _procesar(self, meta, hist_filas, filas):
         try:
             self.dolar = json.loads(meta.get("dolar") or "{}")
         except ValueError:
@@ -412,12 +422,9 @@ class Catalogo:
         self.inicio = meta.get("inicio_base") or ""
         self.ultima = meta.get("ultima_actualizacion") or ""
         hist: dict[int, list] = {}
-        for pid, fe, an, de in c.execute(text(
-                "SELECT propiedad_id, fecha, precio_anterior, precio FROM historial_precios ORDER BY fecha")):
+        for pid, fe, an, de in hist_filas:
             hist.setdefault(pid, []).append([_txt(fe), _f(an), _f(de)])
-        data = []
-        for r in c.execute(text(SQL_PROPS)).mappings():
-            data.append(self._fila(r, hist.get(r["id"], [])))
+        data = [self._fila(r, hist.get(r["id"], [])) for r in filas]
         self.data = data
         self.por_id = {o["id"]: o for o in data}
         self.credito["lineas"] = [condiciones(x) for x in self.credito.get("lineas") or []]
@@ -450,7 +457,8 @@ class Catalogo:
         o["fecha_baja"] = o["fecha_baja"] or None
         o["_alertas"] = ia.get("alertas") if ia and isinstance(ia.get("alertas"), list) else []
         o["_n"] = norm(" ".join(str(x or "") for x in (o["titulo"], o["direccion"], o["barrio"], o["descripcion"])))
-        o["_excl"] = any(x in norm(o["inmobiliaria"]) for x in self.excluidas)
+        inmo = norm(o["inmobiliaria"])
+        o["_excl"] = any(x in inmo for x in self.excluidas)
         o["_barrio"] = (o["barrio"] or "").strip()
         o["precio_publicado"] = o["precio"]
         o["_precio_falso"] = None
@@ -926,7 +934,8 @@ def _recargar_en_fondo(viejo: Catalogo, version: str) -> None:
     try:
         nuevo = Catalogo(viejo.engine, viejo.refresco_seg)
         with nuevo.engine.connect() as c:
-            nuevo._cargar(c)
+            crudo = nuevo._leer(c)
+        nuevo._procesar(*crudo)
         nuevo.version, nuevo.revisado = version, time.monotonic()
         with _CAT_LOCK:
             if _CAT is viejo:
