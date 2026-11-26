@@ -29,6 +29,26 @@ app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_origin], all
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
 
 
+def sembrar_credito() -> None:
+    """Si la base todavía no tiene las tasas de crédito (meta 'credito'), carga las últimas que leyó El Ojo de Dios
+    (BCRA, 25/11/2026). El actualizador las renueva solo una vez por día; esto es solo para no arrancar vacío."""
+    from pathlib import Path
+
+    from app.db import SessionLocal
+    with SessionLocal() as db:
+        hay = db.execute(text("SELECT valor FROM meta WHERE clave = 'credito'")).scalar()
+        try:
+            ok = bool(hay and json.loads(hay).get("lineas"))
+        except ValueError:
+            ok = False
+        if not ok:
+            semilla = (Path(__file__).parent / "datos" / "credito_semilla.json").read_text(encoding="utf-8")
+            db.execute(text("INSERT INTO meta (clave, valor) VALUES ('credito', :v) "
+                            "ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor"), {"v": semilla})
+            db.commit()
+            log.info("tasas de crédito cargadas desde la semilla")
+
+
 @app.on_event("startup")
 def precalentar():
     """Carga el catálogo y lo pesado en segundo plano apenas arranca el servidor."""
@@ -39,6 +59,7 @@ def precalentar():
             from app.api.sectores import precalentar as sectores
             from app.db import SessionLocal
             from app.services.catalogo import catalogo
+            sembrar_credito()
             catalogo()
             with SessionLocal() as db:
                 sectores(db)
