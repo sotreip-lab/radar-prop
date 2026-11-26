@@ -127,7 +127,8 @@ async def usuario(n: int, base: str, clave: str, fin: float, m: Medidor, fichas:
     async with httpx.AsyncClient(base_url=base, timeout=60, http2=False) as cli:
         r = await pedir(cli, m, "login", "POST", "/auth/login", json={"usuario": f"{PREFIJO}{n:02d}", "password": clave})
         if not r or r.status_code != 200:
-            m.errores.append(f"carga{n:02d} no pudo entrar ({r.status_code if r else 'sin respuesta'})")
+            m.errores.append(f"carga{n:02d} no pudo entrar ({r.status_code if r else 'sin respuesta'}: "
+                             f"{r.text[:150] if r is not None else ''})")
             return
         cli.headers["Authorization"] = "Bearer " + r.json()["access_token"]
         ids: list[int] = []
@@ -187,13 +188,16 @@ async def principal(a):
 
     total = sum(len(v) for v in m.tiempos.values())
     n5xx = sum(n for cod in m.codigos.values() for k, n in cod.items() if k >= 500 or k == 0)
-    p95_buscar = p(m.tiempos["buscar"], 0.95)
+    buscadas = m.tiempos.get("buscar", [])
+    p95_buscar = p(buscadas, 0.95)
     filas = []
     for acc in sorted(m.tiempos):
         t = m.tiempos[acc]
+        if not t:
+            continue
         filas.append(f"| {acc} | {len(t)} | {statistics.median(t) * 1000:.0f} ms | {p(t, 0.95) * 1000:.0f} ms | "
                      f"{max(t) * 1000:.0f} ms | {dict(sorted(m.codigos[acc].items()))} |")
-    ok = n5xx == 0 and p95_buscar < 1.0 and m.tiempos["buscar"]
+    ok = n5xx == 0 and p95_buscar < 1.0 and len(buscadas) > 0 and not m.errores
     informe = "\n".join([
         f"## Prueba de carga — {'APROBADA ✅' if ok else 'NO APROBADA ❌'}",
         "",
