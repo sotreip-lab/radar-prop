@@ -3,6 +3,7 @@ import hashlib
 import re
 import secrets
 import string
+import threading
 from datetime import UTC, datetime, timedelta
 
 import jwt
@@ -11,18 +12,32 @@ from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatc
 
 from app.core.config import settings
 
-_ph = PasswordHasher()  # Argon2id con parámetros recomendados
+# Argon2id con los parámetros mínimos que recomienda OWASP (19 MiB, 2 pasadas). Los de fábrica usan 64 MiB por
+# cálculo: en el servidor gratis (512 MB) diez ingresos a la vez lo dejaban sin memoria.
+_ph = PasswordHasher(time_cost=2, memory_cost=19 * 1024, parallelism=1)
+# Como mucho 2 cálculos de contraseña a la vez; el resto espera su turno (unos milisegundos), no tumba el servidor.
+_turnos = threading.BoundedSemaphore(2)
 ALG = "HS256"
 
 
 def hash_password(clave: str) -> str:
-    return _ph.hash(clave)
+    with _turnos:
+        return _ph.hash(clave)
 
 
 def verificar_password(hash_guardado: str, clave: str) -> bool:
     try:
-        return _ph.verify(hash_guardado, clave)
+        with _turnos:
+            return _ph.verify(hash_guardado, clave)
     except (VerifyMismatchError, VerificationError, InvalidHashError):
+        return False
+
+
+def necesita_rehash(hash_guardado: str) -> bool:
+    """True si la contraseña se guardó con los parámetros viejos (se vuelve a guardar al ingresar)."""
+    try:
+        return _ph.check_needs_rehash(hash_guardado)
+    except InvalidHashError:
         return False
 
 
