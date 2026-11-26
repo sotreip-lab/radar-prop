@@ -21,8 +21,9 @@ from app.services.sectores import captacion, comun, mercado, zonas
 
 router = APIRouter(tags=["sectores"])
 OTRO_USUARIO = "Otro usuario modificó esto. Recargá para ver los cambios."
-_CACHE: dict = {"v": None, "t": 0.0, "datos": None}
-_CACHE_CAP: dict = {"v": None, "datos": None}
+_CACHE: dict = {"v": None, "marcas": None, "t": 0.0, "datos": None}
+_CACHE_CAP: dict = {"v": None, "t": 0.0, "datos": None}
+REFRESCO_SECTORES = 30 * 60  # segundos
 _LOCK = threading.Lock()
 _LOCK_CAP = threading.Lock()
 
@@ -50,12 +51,15 @@ def _marcas(db: Session) -> dict:
 @router.get("/mercado")
 def mercado_datos(forzar: bool = False, a: Actual = Depends(usuario_actual), db: Session = Depends(get_db)):
     cat = catalogo()
-    marcas = _marcas(db)
-    clave = (cat.version, tuple(sorted(marcas.items())))
+    marcas = tuple(sorted(_marcas(db).items()))
     with _LOCK:
-        if forzar or _CACHE["datos"] is None or _CACHE["v"] != clave or time.monotonic() - _CACHE["t"] > 600:
-            _CACHE["datos"] = mercado.calcular(filas_legado(), _dolar(), marcas, cat.inicio)
-            _CACHE["v"], _CACHE["t"] = clave, time.monotonic()
+        viejo = time.monotonic() - _CACHE["t"]
+        # Se recalcula si alguien marcó una venta, o si llegaron datos nuevos y lo guardado tiene más de 30 minutos.
+        # (El actualizador trae datos cada 15 min; recalcular el mapa cada vez frenaba el servidor gratis.)
+        if (forzar or _CACHE["datos"] is None or _CACHE["marcas"] != marcas
+                or (_CACHE["v"] != cat.version and viejo > REFRESCO_SECTORES)):
+            _CACHE["datos"] = mercado.calcular(filas_legado(), _dolar(), dict(marcas), cat.inicio)
+            _CACHE["v"], _CACHE["marcas"], _CACHE["t"] = cat.version, marcas, time.monotonic()
         return _CACHE["datos"]
 
 
@@ -89,10 +93,12 @@ def captacion_datos(a: Actual = Depends(usuario_actual), db: Session = Depends(g
 
 
 def _senales():
-    """Las señales de captación solo cambian cuando llegan datos nuevos: se calculan una vez por versión del catálogo."""
+    """Las señales de captación solo cambian cuando llegan datos nuevos: se recalculan con datos nuevos, como mucho
+    cada 30 minutos."""
     cat = catalogo()
     with _LOCK_CAP:
-        if _CACHE_CAP["v"] != cat.version or _CACHE_CAP["datos"] is None:
+        if _CACHE_CAP["datos"] is None or (_CACHE_CAP["v"] != cat.version
+                                             and time.monotonic() - _CACHE_CAP["t"] > REFRESCO_SECTORES):
             filas = filas_legado()
             hist = {o["id"]: [(x[1], x[2]) for x in o["hist"] if x[1] is not None and x[2] is not None] for o in cat.data if o["hist"]}
             dolar = _dolar()
@@ -102,7 +108,7 @@ def _senales():
                        for f in filas if f["estado_aviso"] == "activo"]
             del filas, hist
             _CACHE_CAP["datos"] = (s, med, activas, dolar)
-            _CACHE_CAP["v"] = cat.version
+            _CACHE_CAP["v"], _CACHE_CAP["t"] = cat.version, time.monotonic()
         return _CACHE_CAP["datos"]
 
 
