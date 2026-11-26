@@ -20,6 +20,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from functools import lru_cache
 from typing import Any
 
 from sqlalchemy import text
@@ -111,6 +112,21 @@ def sim(m) -> str:
     return "$" if m == "ARS" else "USD"
 
 
+_ESTRENAR = re.compile(r"estrenar|construcci", re.I)
+_FECHA_HORA = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
+
+
+@lru_cache(maxsize=4096)
+def _dia(f: str) -> datetime:
+    """strptime de 'AAAA-MM-DD' (las fechas se repiten mucho: se calcula una vez cada una)."""
+    return datetime.strptime(f, "%Y-%m-%d")
+
+
+def _fecha_hora(f: str) -> datetime:
+    # fromisoformat es 10 veces más rápido; solo se usa cuando el texto tiene exactamente el formato esperado
+    return datetime.fromisoformat(f) if _FECHA_HORA.fullmatch(f) else datetime.strptime(f, "%Y-%m-%d %H:%M:%S")
+
+
 def dias_desde(f: str | None, ahora: datetime) -> int | None:
     """diasDesde() de ui.html. Igual que en el navegador, una fecha sin hora ("2026-11-11") cuenta como la
     medianoche UTC, que en Bahía Blanca son las 21 h del día anterior."""
@@ -118,9 +134,9 @@ def dias_desde(f: str | None, ahora: datetime) -> int | None:
         return None
     try:
         if len(f.strip()) <= 10:
-            d = datetime.strptime(f[:10], "%Y-%m-%d") - timedelta(hours=3)
+            d = _dia(f[:10]) - timedelta(hours=3)
         else:
-            d = datetime.strptime(f[:19], "%Y-%m-%d %H:%M:%S")
+            d = _fecha_hora(f[:19])
         return max(0, math.floor((ahora - d).total_seconds() / 86400))
     except ValueError:
         return None
@@ -132,6 +148,8 @@ def clave_dir(direccion: str | None) -> str | None:
 
 
 def clave_dup(o: dict) -> str | None:
+    if "_cdup" in o:  # ya calculada al cargar el catálogo
+        return o["_cdup"]
     if not o.get("precio") or not o.get("direccion"):
         return None
     d = clave_dir(o["direccion"])
@@ -355,6 +373,7 @@ class Catalogo:
         self.revisado = 0.0
         self.data: list[dict] = []
         self.por_id: dict[int, dict] = {}
+        self.por_oper: dict[tuple[str, bool], list[dict]] = {}
         self.dolar: dict = {}
         self.credito: dict = {}
         self.inicio = ""
@@ -431,6 +450,12 @@ class Catalogo:
         data = [self._fila(r, hist.get(r["id"], [])) for r in filas]
         self.data = data
         self.por_id = {o["id"]: o for o in data}
+        # índice por operación (con y sin las dadas de baja), en el mismo orden que data: la búsqueda recorre solo esas
+        self.por_oper = {}
+        for o in data:
+            self.por_oper.setdefault((o["operacion"], True), []).append(o)
+            if o["estado_aviso"] != "baja":
+                self.por_oper.setdefault((o["operacion"], False), []).append(o)
         self.credito["lineas"] = [condiciones(x) for x in self.credito.get("lineas") or []]
         self.lcand = candidatas(self.credito)
         self.ldef = self.lcand[0] if self.lcand else None
@@ -469,6 +494,8 @@ class Catalogo:
         if o["precio"] and not precio_real(o["precio"], o["moneda"], o["operacion"]):
             o["_precio_falso"], o["precio"] = o["precio"], None
         o["balcon"] = "Sí" if re.search(r"Balc|Terraza", o["exterior"] or "") else "No informado"
+        o["_dn"] = re.sub(r"[^a-z0-9]", "", norm(o["direccion"].split(",")[0])) if o["direccion"] else ""
+        o["_cdup"] = clave_dup(o)
         return o
 
     def _analisis(self):
@@ -500,13 +527,19 @@ class Catalogo:
             ga.setdefault(f"b|{t}|{d}|{o['ciudad']}|{o['_barrio']}", []).append(ars)
             ga.setdefault(f"c|{t}|{d}|{o['ciudad']}", []).append(ars)
         gd: dict[str, list] = {}
+        ntipo: dict = {}  # norm() de cada tipo, una vez por tipo distinto
+
+        def nt(t):
+            if t not in ntipo:
+                ntipo[t] = norm(t)
+            return ntipo[t]
         for o in act:
             if not o["precio"] or not o["direccion"]:
                 continue
-            d = re.sub(r"[^a-z0-9]", "", norm(o["direccion"].split(",")[0]))
+            d = o["_dn"]
             if not re.search(r"\d", d) or len(d) < 5:
                 continue
-            gd.setdefault(f"{d}|{o['operacion']}|{norm(o['tipo'])}|{'' if o['dormitorios'] is None else o['dormitorios']}|{o['moneda']}",
+            gd.setdefault(f"{d}|{o['operacion']}|{nt(o['tipo'])}|{'' if o['dormitorios'] is None else o['dormitorios']}|{o['moneda']}",
                           []).append(o)
         for o in self.data:
             o["_vsb"] = o["_renta"] = o["_otros_precios"] = o["_cuota"] = None
@@ -536,8 +569,8 @@ class Catalogo:
                     if 1 <= pct <= 15:
                         o["_renta"] = {"pct": pct, "alq": alq, "n": len(ref2["a"]), "nivel": ref2["nivel"], "dolar": dv}
             if o["precio"] and o["direccion"]:
-                d = re.sub(r"[^a-z0-9]", "", norm(o["direccion"].split(",")[0]))
-                gr = gd.get(f"{d}|{o['operacion']}|{norm(o['tipo'])}|{'' if o['dormitorios'] is None else o['dormitorios']}|{o['moneda']}", [])
+                d = o["_dn"]
+                gr = gd.get(f"{d}|{o['operacion']}|{nt(o['tipo'])}|{'' if o['dormitorios'] is None else o['dormitorios']}|{o['moneda']}", [])
                 distintos = len({js_round(x["precio"] / 1000) for x in gr})
                 otros = [] if distintos > 3 else [
                     x for x in gr if x is not o and (x["fuente"] != o["fuente"] or norm(x["inmobiliaria"]) != norm(o["inmobiliaria"]))
@@ -689,10 +722,7 @@ class Catalogo:
                 obs.append("m² no informados")
             elif o["sup_cub"] < F.supmin:
                 return None
-        for k in ("patio", "cochera", "pileta", "balcon", "parrilla"):
-            want = getattr(F, k)
-            if not want:
-                continue
+        for k, want in ctx["sino"]:
             v = o.get(k) or "No informado"
             if v == "No informado":
                 if want == "no":
@@ -734,10 +764,9 @@ class Catalogo:
                 obs.append("crédito según descripción")
             elif "IA" in v:
                 obs.append("crédito según IA")
-        estr = re.compile(r"estrenar|construcci", re.I)
-        if F.estrenar and not estr.search(f"{o['antiguedad']} {o['estado']} {o['descripcion']}"):
+        if F.estrenar and not _ESTRENAR.search(f"{o['antiguedad']} {o['estado']} {o['descripcion']}"):
             return None
-        if estr.search(o["antiguedad"] or ""):
+        if _ESTRENAR.search(o["antiguedad"] or ""):
             obs.append(o["antiguedad"])
         p = o["precio"] if (o["moneda"] == F.mon and o["precio"]) else None
         color, barata, dif = "Verde", False, None
@@ -812,10 +841,13 @@ class Catalogo:
             "tipos": set(F.tipos or []), "barrios": set(F.barrios or []), "kw": norm(F.kw).split() if F.kw else [],
             "nuevas": (ahora_local() - timedelta(hours=F.nuevas_horas)).strftime("%Y-%m-%d %H:%M:%S") if F.nuevas_horas else "",
             "zona_dist": zona_dist, "qg": leer_qg(F.qg), "solo_ids": set(F.solo_ids) if F.solo_ids is not None else None,
+            "sino": [(k, getattr(F, k)) for k in ("patio", "cochera", "pileta", "balcon", "parrilla") if getattr(F, k)],
         }
         todos = []
         plat_cnt: dict[str, int] = {}
-        for o in self.data:
+        # evaluar() descarta igual las de otra operación y las dadas de baja: se saltean de entrada (mismo resultado)
+        filas = self.data if (ctx["qg"] or ctx["solo_ids"] is not None) else self.por_oper.get((F.oper, bool(F.bajas)), [])
+        for o in filas:
             r = self.evaluar(o, F, ctx)
             if r:
                 todos.append(r)
