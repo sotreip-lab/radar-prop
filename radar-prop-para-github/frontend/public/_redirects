@@ -1,3 +1,4 @@
+/.well-known/assetlinks.json  /assetlinks.json  200
 /api/*  https://radar-prop-api.onrender.com/api/:splat  200
 /f/*    https://radar-prop-api.onrender.com/f/:splat  200
 /*      /index.html  200

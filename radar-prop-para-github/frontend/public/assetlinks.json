@@ -1,0 +1,5 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {"namespace": "android_app", "package_name": "ar.radarprop.app",
+             "sha256_cert_fingerprints": ["4F:C4:88:3F:73:28:5E:7A:F5:AD:76:CD:A2:74:D5:98:FD:98:5E:2F:46:4F:15:9D:89:A1:57:80:C4:88:1A:39"]}
+}]
