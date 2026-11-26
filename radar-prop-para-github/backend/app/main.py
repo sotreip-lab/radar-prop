@@ -1,12 +1,14 @@
 """API de Radar Prop."""
 import json
 import logging
+import os
 import time
 import uuid
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
@@ -21,6 +23,30 @@ app = FastAPI(title="Radar Prop", version="0.4.0", docs_url="/docs", redoc_url=N
 app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_origin], allow_credentials=True,
                    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
                    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"])
+
+
+# Las respuestas grandes (listas, mapa, mapa de valores) viajan comprimidas: pesan entre 5 y 10 veces menos.
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
+
+
+@app.on_event("startup")
+def precalentar():
+    """Carga el catálogo y lo pesado en segundo plano apenas arranca el servidor."""
+    import threading
+
+    def tarea():
+        try:
+            from app.api.sectores import precalentar as sectores
+            from app.db import SessionLocal
+            from app.services.catalogo import catalogo
+            catalogo()
+            with SessionLocal() as db:
+                sectores(db)
+            log.info("precalentado listo")
+        except Exception:  # noqa: BLE001
+            log.exception("no se pudo precalentar")
+    if os.environ.get("PRECALENTAR", "1") == "1":
+        threading.Thread(target=tarea, daemon=True).start()
 
 
 @app.middleware("http")

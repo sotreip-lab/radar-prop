@@ -12,7 +12,9 @@ pedida (máximo 100) o los puntos livianos del mapa.
 from __future__ import annotations
 
 import json
+import logging
 import math
+import os
 import re
 import threading
 import time
@@ -360,6 +362,7 @@ class Catalogo:
         self.excluidas = [norm(x) for x in INMOBILIARIAS_EXCLUIDAS]
         self.ldef: dict | None = None
         self.lcand: list[dict] = []
+        self.recargando = False
 
     # -------------------------------------------------------------- carga
     def _version_actual(self, c) -> str:
@@ -375,9 +378,19 @@ class Catalogo:
                 return self
             with self.engine.connect() as c:
                 v = self._version_actual(c)
-                if v != self.version or not self.data:
+                if not self.data:
                     self._cargar(c)
                     self.version = v
+                elif v != self.version:
+                    if RECARGA_EN_FONDO:
+                        # Hay datos nuevos (pasó el actualizador): se cargan aparte y se cambian de una vez.
+                        # Mientras tanto se sigue respondiendo con los anteriores, así nadie espera la recarga.
+                        if not self.recargando:
+                            self.recargando = True
+                            threading.Thread(target=_recargar_en_fondo, args=(self, v), daemon=True).start()
+                    else:
+                        self._cargar(c)
+                        self.version = v
             self.revisado = time.monotonic()
         return self
 
@@ -903,6 +916,30 @@ class Catalogo:
 
 _CAT: Catalogo | None = None
 _CAT_LOCK = threading.Lock()
+
+
+RECARGA_EN_FONDO = os.environ.get("CATALOGO_FONDO", "1") == "1"
+
+
+def _recargar_en_fondo(viejo: Catalogo, version: str) -> None:
+    global _CAT
+    try:
+        nuevo = Catalogo(viejo.engine, viejo.refresco_seg)
+        with nuevo.engine.connect() as c:
+            nuevo._cargar(c)
+        nuevo.version, nuevo.revisado = version, time.monotonic()
+        with _CAT_LOCK:
+            if _CAT is viejo:
+                _CAT = nuevo
+        # deja listos también el mapa de valores y la captación con los datos nuevos
+        from app.api.sectores import precalentar
+        from app.db import SessionLocal
+        with SessionLocal() as db:
+            precalentar(db)
+    except Exception:  # noqa: BLE001 — si falla, se sigue con los datos anteriores y se reintenta en la próxima consulta
+        logging.getLogger("radar").exception("no se pudo recargar el catálogo")
+    finally:
+        viejo.recargando = False
 
 
 def catalogo() -> Catalogo:
