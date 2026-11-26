@@ -1,0 +1,101 @@
+# Fase 6: arma la APK de Android y el instalador de Windows y los publica en
+# https://github.com/sotreip-lab/radar-prop/releases/latest (siempre el mismo enlace).
+# Se lanza a mano (Actions → Apps → Run workflow) o solo cuando cambia algo en radar-prop-para-github/apps.
+# Las apps abren la web, así que NO hace falta volver a armarlas cuando se actualiza la web.
+name: Apps
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["radar-prop-para-github/apps/**", ".github/workflows/apps.yml"]
+permissions:
+  contents: write
+concurrency:
+  group: apps
+  cancel-in-progress: true
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: radar-prop-para-github/apps/android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+      - name: Íconos (desde el ícono de la web)
+        run: |
+          pip install --quiet pillow
+          python - <<'PY'
+          import os
+          from PIL import Image
+          src = Image.open("../../frontend/public/icono-512.png").convert("RGBA")
+          for d, s in [("mdpi", 48), ("hdpi", 72), ("xhdpi", 96), ("xxhdpi", 144), ("xxxhdpi", 192)]:
+              p = f"app/src/main/res/mipmap-{d}"
+              os.makedirs(p, exist_ok=True)
+              src.resize((s, s), Image.LANCZOS).save(f"{p}/ic_launcher.png")
+          PY
+      - name: Armar APK firmada
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          VERSION_CODE: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          [ -n "$ANDROID_KEYSTORE_B64" ] || { echo "::error::Falta el secreto ANDROID_KEYSTORE_B64"; exit 1; }
+          export KS_PATH="$RUNNER_TEMP/radarprop.p12"
+          echo "$ANDROID_KEYSTORE_B64" | base64 -d > "$KS_PATH"
+          gradle --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/RadarProp.apk"
+          rm -f "$KS_PATH"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: ${{ runner.temp }}/RadarProp.apk
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: radar-prop-para-github/apps/windows
+    steps:
+      - uses: actions/checkout@v4
+      - name: Armar instalador
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc "/DVersion=1.0.${{ github.run_number }}" radarprop.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: radar-prop-para-github/apps/windows/Output/RadarProp-Instalador.exe
+
+  publicar:
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: apps
+          merge-multiple: true
+      - name: Publicar en Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          R="${{ github.repository }}"
+          TAG="apps-v${{ github.run_number }}"
+          gh release create "$TAG" apps/RadarProp.apk apps/RadarProp-Instalador.exe --repo "$R" --latest \
+            --title "Radar Prop — apps (versión ${{ github.run_number }})" \
+            --notes "Android: descargá **RadarProp.apk** desde el celular y abrila (si pide permiso para instalar apps de otras fuentes, aceptalo).
+          Windows: descargá **RadarProp-Instalador.exe** y abrilo. Si aparece *Windows protegió su PC*, tocá *Más información* → *Ejecutar de todas formas*.
+          Las dos abren https://radar-prop.netlify.app, así que siempre muestran la última versión de la app."
