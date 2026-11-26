@@ -10,6 +10,9 @@ import { ApiError } from "./api";
 import { BusquedaProvider } from "./busqueda";
 import { SesionProvider } from "./sesion";
 import { ToastProvider } from "./toast";
+import { enApp, prepararApp } from "./nativo";
+
+prepararApp(); // dentro de la app de Android: links, descargas y ventanas
 
 // Modo claro u oscuro: el que elija la persona en "Mi cuenta"; si no eligió, el del teléfono o la PC.
 const tema = localStorage.getItem("rp_tema");
@@ -28,7 +31,8 @@ const qc = new QueryClient({
 const actualizarSW = registerSW({
   onNeedRefresh() {
     // Hay una versión nueva de la app: se aplica sola la próxima vez que se abre, o ya mismo si la persona acepta.
-    if (confirm("Hay una versión nueva de Radar Prop. ¿Actualizar ahora?")) actualizarSW(true);
+    // en la app de Android se aplica sola; en el navegador se pregunta
+    if (enApp() || confirm("Hay una versión nueva de Radar Prop. ¿Actualizar ahora?")) actualizarSW(true);
   },
 });
 
