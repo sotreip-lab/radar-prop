@@ -23,7 +23,7 @@ from app.db import get_db
 from app.models import Cliente, FichaGenerada
 from app.scraper import bbp, ibb
 from app.services.auditoria import registrar
-from app.services.catalogo import PLAT_NOM, catalogo
+from app.services.catalogo import PLAT_NOM, catalogo, ficha_whatsapp
 from app.services.fichas_formato import generar_excel, html_ficha_cliente, item_para_panel
 
 router = APIRouter(tags=["fichas"])
@@ -100,7 +100,7 @@ def crear_ficha(datos: FichaIn, a: Actual = Depends(usuario_actual), db: Session
             cliente = cliente or c.nombre
     cat = catalogo()
     if datos.tipo == "whatsapp":
-        textos = [f"*{n}.*\n" + cat.por_id[i]["ficha"] for n, i in enumerate(datos.ids, 1) if i in cat.por_id]
+        textos = [f"*{n}.*\n" + ficha_whatsapp(cat.por_id[i]) for n, i in enumerate(datos.ids, 1) if i in cat.por_id]
         f = FichaGenerada(user_id=a.id, cliente_id=datos.cliente_id, propiedades_ids=datos.ids, tipo="whatsapp",
                           enlace=None, clave_idempotencia=datos.clave_idempotencia)
         db.add(f)

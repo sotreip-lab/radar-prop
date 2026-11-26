@@ -97,7 +97,11 @@ def _senales():
             hist = {o["id"]: [(x[1], x[2]) for x in o["hist"] if x[1] is not None and x[2] is not None] for o in cat.data if o["hist"]}
             dolar = _dolar()
             s, med = captacion.senales(filas, hist, dolar)
-            _CACHE_CAP["datos"] = (s, med, [f for f in filas if f["estado_aviso"] == "activo"], dolar)
+            # de las activas solo se guarda lo que usa la lista de dueños directos (no una segunda copia del catálogo)
+            activas = [{k: f[k] for k in ("direccion", "inmobiliaria", "precio", "moneda", "fuente", "url", "tipo")}
+                       for f in filas if f["estado_aviso"] == "activo"]
+            del filas, hist
+            _CACHE_CAP["datos"] = (s, med, activas, dolar)
             _CACHE_CAP["v"] = cat.version
         return _CACHE_CAP["datos"]
 

@@ -7,7 +7,15 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.deps import Actual, ip_de, limite_auth, usuario_logueado
-from app.core.security import crear_access_token, hash_password, hash_refresh, nuevo_refresh, password_valida, verificar_password
+from app.core.security import (
+    crear_access_token,
+    hash_password,
+    hash_refresh,
+    necesita_rehash,
+    nuevo_refresh,
+    password_valida,
+    verificar_password,
+)
 from app.db import get_db
 from app.models import Sesion, Usuario
 from app.schemas.usuarios import CambiarPasswordIn, LoginIn, SolicitudAccesoIn, TokenOut, UsuarioOut
@@ -57,6 +65,8 @@ def login(datos: LoginIn, request: Request, response: Response, db: Session = De
     u.intentos_fallidos = 0
     u.bloqueado_hasta = None
     u.ultimo_ingreso = ahora
+    if necesita_rehash(u.hash_password):
+        u.hash_password = hash_password(datos.password)
     token, h = nuevo_refresh()
     disp = datos.dispositivo or (request.headers.get("user-agent") or "")[:200] or None
     s = Sesion(user_id=u.id, refresh_hash=h, dispositivo=disp, ip=ip, expira_en=ahora + timedelta(days=settings.refresh_dias))
