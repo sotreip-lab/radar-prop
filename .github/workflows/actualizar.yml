@@ -1,9 +1,10 @@
-# Lee Bahía Blanca Propiedades e IBB cada 15 minutos y actualiza la base (Supabase).
+# Lee Bahía Blanca Propiedades e IBB y actualiza la base (Supabase).
+# Corre 3 veces por día (mañana, tarde y noche): lo lanza cron-job.org (tarea "Actualizar propiedades").
+# El reloj propio de GitHub no se usa porque es irregular y podía duplicar corridas.
+# Ritmo liviano con los sitios: 2 pedidos a la vez.
 # Necesita el secreto DATABASE_URL (Settings → Secrets and variables → Actions).
 name: Actualizar propiedades
 on:
-  schedule:
-    - cron: "*/15 * * * *"
   workflow_dispatch:
     inputs:
       modo:
@@ -35,6 +36,9 @@ jobs:
       - name: Actualizar
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          RADAR_HILOS: "2"
+          RADAR_REVERIFICAR: "600"
+          RADAR_IBB_REVERIFICAR: "250"
         run: |
           if [ -z "$DATABASE_URL" ]; then echo "::error::Falta el secreto DATABASE_URL"; exit 1; fi
           python -m worker.actualizar --modo "${{ inputs.modo || 'rapida' }}" --max-minutos 11
