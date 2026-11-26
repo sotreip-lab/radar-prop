@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.api import admin_usuarios, auth, clientes, eventos, fichas, historial, me, propiedades, sectores, selecciones
+from app.core import memoria  # noqa: F401  (limita la fragmentación de memoria antes de abrir hilos)
 from app.core.config import settings
 from app.db import engine
 
@@ -57,12 +58,14 @@ def precalentar():
     def tarea():
         try:
             from app.api.sectores import precalentar as sectores
+            from app.core.memoria import liberar_memoria
             from app.db import SessionLocal
             from app.services.catalogo import catalogo
             sembrar_credito()
             catalogo()
             with SessionLocal() as db:
                 sectores(db)
+            liberar_memoria()
             log.info("precalentado listo")
         except Exception:  # noqa: BLE001
             log.exception("no se pudo precalentar")
