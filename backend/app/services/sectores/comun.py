@@ -1,12 +1,12 @@
 """Herramientas compartidas por los sectores aparte (copia de modulos/comun.py de El Ojo de Dios)."""
 import re
-import unicodedata
 from collections import Counter
+
+from app.core.texto import sin_marcas
 
 
 def norm(s):
-    s = unicodedata.normalize("NFD", s or "")
-    return "".join(c for c in s if unicodedata.category(c) != "Mn").lower().strip()
+    return sin_marcas(s or "").lower().strip()
 
 
 GRUPOS_TIPO = [

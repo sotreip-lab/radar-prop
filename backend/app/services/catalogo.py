@@ -12,11 +12,12 @@ pedida (máximo 100) o los puntos livianos del mapa.
 from __future__ import annotations
 
 import json
+import logging
 import math
+import os
 import re
 import threading
 import time
-import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -24,7 +25,9 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from app.core.texto import sin_marcas
 from app.scraper.red import ahora_local
+from app.services.credito_lineas import condiciones, simular
 
 PLAT_NOM = {"BBP": "Bahía Blanca Propiedades", "IBB": "IBB", "ZP": "ZonaProp"}
 PLAT_CORTO = {"BBP": "BBP", "IBB": "IBB", "ZP": "ZONAPROP"}
@@ -36,8 +39,7 @@ BENEF_GRAL = re.compile(r"todos|sueldo|dependencia|cuenta", re.I)
 
 
 def norm(s: Any) -> str:
-    s = unicodedata.normalize("NFD", str(s or ""))
-    return "".join(c for c in s if unicodedata.category(c) != "Mn").lower()
+    return sin_marcas(str(s or "")).lower()
 
 
 def js_round(x: float) -> int:
@@ -218,12 +220,17 @@ def lineas_viv(cred: dict) -> list[dict]:
     return [ln for ln in (cred or {}).get("lineas", []) if ln.get("destino") == "Vivienda única"]
 
 
-def linea_defecto(cred: dict) -> dict | None:
+def candidatas(cred: dict) -> list[dict]:
+    """Líneas de uso general (no exclusivas de empleados públicos), de la más barata a la más cara."""
     viv = lineas_viv(cred)
     cand = [ln for ln in viv if ln.get("es_banco") is not False and BENEF_GRAL.search(ln.get("beneficiario") or "")
             and not re.search(r"públic", ln.get("beneficiario") or "", re.I)
             and not re.search(r"p[uú]blico", ln.get("linea") or "", re.I) and ln.get("ltv", 100) <= 80]
-    lista = sorted(cand or viv, key=lambda ln: ln["tea"])
+    return sorted(cand or viv, key=lambda ln: ln["tea"])
+
+
+def linea_defecto(cred: dict) -> dict | None:
+    lista = candidatas(cred)
     return lista[0] if lista else None
 
 
@@ -235,23 +242,23 @@ def precio_pesos(o: dict, dolar: float) -> float | None:
     return o["precio"] * dolar if dolar else None
 
 
-def calc_cuota(o: dict, ln: dict, cred: dict, dolar: float, anios: int | None = None, ltv: float | None = None) -> dict | None:
+def calc_cuota(o: dict, ln: dict | list[dict], cred: dict, dolar: float, anios: int | None = None,
+               ltv: float | None = None) -> dict | None:
+    """Simula con la línea dada. Con una lista, usa la más barata para la que la propiedad califica (o None)."""
     pp = precio_pesos(o, dolar)
     if not pp or not ln:
         return None
-    anios = min(anios or cred.get("plazo_anios", 20), math.floor(ln["plazo"] / 12))
-    ltv = min(ltv or ln["ltv"], ln["ltv"])
-    prestamo = pp * ltv / 100
-    if ln.get("monto_max") and prestamo > ln["monto_max"]:
-        prestamo = ln["monto_max"]
-    n = anios * 12
-    i = (1 + ln["tea"] / 100) ** (1 / 12) - 1
-    cuota = prestamo * i / (1 - (1 + i) ** -n)
     uva = (cred.get("uva") or {}).get("valor")
-    return {"cuota": cuota, "prestamo": prestamo, "anios": anios, "ltv": round(prestamo / pp * 100), "pp": pp,
-            "anticipo": pp - prestamo, "ingreso": max(cuota / (ln["rci"] / 100), ln.get("ingreso_min") or 0),
-            "cuota_uva": cuota / uva if uva else None, "uvas": prestamo / uva if uva else None, "total": cuota * n,
-            "linea": {k: ln.get(k) for k in ("banco", "linea", "tea", "beneficiario", "rci", "ltv", "plazo", "monto_max", "nota")}}
+    plazo = anios or cred.get("plazo_anios", 20)
+    for x in ln if isinstance(ln, list) else [ln]:
+        r = simular(pp, x, uva, plazo, ltv)
+        if r and (r["califica"] or not isinstance(ln, list)):
+            return {**r, "linea": _linea_corta(x)}
+    return None
+
+
+def _linea_corta(ln: dict) -> dict:
+    return {k: ln.get(k) for k in ("banco", "linea", "tea", "beneficiario", "rci", "ltv", "plazo", "monto_max", "nota")}
 
 
 # ------------------------------------------------------------------ filtros
@@ -353,12 +360,15 @@ class Catalogo:
         self.ultima = ""
         self.excluidas = [norm(x) for x in INMOBILIARIAS_EXCLUIDAS]
         self.ldef: dict | None = None
+        self.lcand: list[dict] = []
+        self.recargando = False
 
     # -------------------------------------------------------------- carga
     def _version_actual(self, c) -> str:
         r = c.execute(text("SELECT (SELECT valor FROM meta WHERE clave='ultima_actualizacion'), "
-                           "(SELECT COUNT(*) FROM propiedades), (SELECT MAX(actualizado_en) FROM propiedades)")).first()
-        return f"{r[0]}|{r[1]}|{r[2]}"
+                           "(SELECT COUNT(*) FROM propiedades), (SELECT MAX(actualizado_en) FROM propiedades), "
+                           "(SELECT md5(string_agg(valor, '|' ORDER BY clave)) FROM meta WHERE clave IN ('credito', 'dolar'))")).first()
+        return f"{r[0]}|{r[1]}|{r[2]}|{r[3]}"
 
     def asegurar(self) -> Catalogo:
         if self.data and time.monotonic() - self.revisado < self.refresco_seg:
@@ -366,11 +376,23 @@ class Catalogo:
         with self.lock:
             if self.data and time.monotonic() - self.revisado < self.refresco_seg:
                 return self
+            crudo = None
             with self.engine.connect() as c:
                 v = self._version_actual(c)
-                if v != self.version or not self.data:
-                    self._cargar(c)
-                    self.version = v
+                if not self.data:
+                    crudo = self._leer(c)
+                elif v != self.version:
+                    if RECARGA_EN_FONDO:
+                        # Hay datos nuevos (pasó el actualizador): se cargan aparte y se cambian de una vez.
+                        # Mientras tanto se sigue respondiendo con los anteriores, así nadie espera la recarga.
+                        if not self.recargando:
+                            self.recargando = True
+                            threading.Thread(target=_recargar_en_fondo, args=(self, v), daemon=True).start()
+                    else:
+                        crudo = self._leer(c)
+            if crudo is not None:
+                self._procesar(*crudo)
+                self.version = v
             self.revisado = time.monotonic()
         return self
 
@@ -379,7 +401,16 @@ class Catalogo:
         self.version = ""
 
     def _cargar(self, c):
+        self._procesar(*self._leer(c))
+
+    def _leer(self, c):
+        """Solo lee de la base (rápido); el procesamiento se hace después, ya sin ocupar una conexión."""
         meta = dict(c.execute(text("SELECT clave, valor FROM meta")).all())
+        hist_filas = c.execute(text("SELECT propiedad_id, fecha, precio_anterior, precio FROM historial_precios ORDER BY fecha")).all()
+        filas = c.execute(text(SQL_PROPS)).mappings().all()
+        return meta, hist_filas, filas
+
+    def _procesar(self, meta, hist_filas, filas):
         try:
             self.dolar = json.loads(meta.get("dolar") or "{}")
         except ValueError:
@@ -392,15 +423,14 @@ class Catalogo:
         self.inicio = meta.get("inicio_base") or ""
         self.ultima = meta.get("ultima_actualizacion") or ""
         hist: dict[int, list] = {}
-        for pid, fe, an, de in c.execute(text(
-                "SELECT propiedad_id, fecha, precio_anterior, precio FROM historial_precios ORDER BY fecha")):
+        for pid, fe, an, de in hist_filas:
             hist.setdefault(pid, []).append([_txt(fe), _f(an), _f(de)])
-        data = []
-        for r in c.execute(text(SQL_PROPS)).mappings():
-            data.append(self._fila(r, hist.get(r["id"], [])))
+        data = [self._fila(r, hist.get(r["id"], [])) for r in filas]
         self.data = data
         self.por_id = {o["id"]: o for o in data}
-        self.ldef = linea_defecto(self.credito)
+        self.credito["lineas"] = [condiciones(x) for x in self.credito.get("lineas") or []]
+        self.lcand = candidatas(self.credito)
+        self.ldef = self.lcand[0] if self.lcand else None
         self._analisis()
 
     def _fila(self, r, hist) -> dict:
@@ -428,7 +458,8 @@ class Catalogo:
         o["fecha_baja"] = o["fecha_baja"] or None
         o["_alertas"] = ia.get("alertas") if ia and isinstance(ia.get("alertas"), list) else []
         o["_n"] = norm(" ".join(str(x or "") for x in (o["titulo"], o["direccion"], o["barrio"], o["descripcion"])))
-        o["_excl"] = any(x in norm(o["inmobiliaria"]) for x in self.excluidas)
+        inmo = norm(o["inmobiliaria"])
+        o["_excl"] = any(x in inmo for x in self.excluidas)
         o["_barrio"] = (o["barrio"] or "").strip()
         o["precio_publicado"] = o["precio"]
         o["_precio_falso"] = None
@@ -524,7 +555,7 @@ class Catalogo:
             o["_baja_pct"] = (1 - o["precio"] / max_p) * 100 if o["precio"] and max_p > o["precio"] else 0.0
             if (o["operacion"] == "Venta" and re.match(r"^Sí", o["apto_credito"] or "") and TIPO_VIV.search(o["tipo"] or "")
                     and self.ldef):
-                o["_cuota"] = calc_cuota(o, self.ldef, self.credito, dv)
+                o["_cuota"] = calc_cuota(o, self.lcand, self.credito, dv)
             mas_barata = bool(o["_otros_precios"] and any(x["precio"] < o["precio"] for x in o["_otros_precios"]))
             o["_margen"] = ("alto" if ((o["_dias_exacto"] and o["_dias"] >= 365) or o["_bajas"] >= 2 or o["_baja_pct"] >= 8)
                             else "medio" if ((o["_dias_exacto"] and o["_dias"] >= 180) or o["_bajas"] >= 1 or mas_barata) else "")
@@ -689,6 +720,10 @@ class Catalogo:
         if F.credito:
             v = o["apto_credito"] or "No confirmado"
             if v.startswith("No (") or v == "No":
+                return None
+            # "si": solo las que el aviso (o su descripción / la IA) confirma como aptas crédito.
+            # "si_nc": además las que no dicen nada (van en amarillo), como hacía El Ojo de Dios.
+            if v == "No confirmado" and F.credito == "si":
                 return None
             if v == "No confirmado":
                 amarillo = True
@@ -894,6 +929,31 @@ class Catalogo:
 
 _CAT: Catalogo | None = None
 _CAT_LOCK = threading.Lock()
+
+
+RECARGA_EN_FONDO = os.environ.get("CATALOGO_FONDO", "1") == "1"
+
+
+def _recargar_en_fondo(viejo: Catalogo, version: str) -> None:
+    global _CAT
+    try:
+        nuevo = Catalogo(viejo.engine, viejo.refresco_seg)
+        with nuevo.engine.connect() as c:
+            crudo = nuevo._leer(c)
+        nuevo._procesar(*crudo)
+        nuevo.version, nuevo.revisado = version, time.monotonic()
+        with _CAT_LOCK:
+            if _CAT is viejo:
+                _CAT = nuevo
+        # deja listos también el mapa de valores y la captación con los datos nuevos
+        from app.api.sectores import precalentar
+        from app.db import SessionLocal
+        with SessionLocal() as db:
+            precalentar(db)
+    except Exception:  # noqa: BLE001 — si falla, se sigue con los datos anteriores y se reintenta en la próxima consulta
+        logging.getLogger("radar").exception("no se pudo recargar el catálogo")
+    finally:
+        viejo.recargando = False
 
 
 def catalogo() -> Catalogo:

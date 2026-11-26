@@ -17,6 +17,8 @@ TEST_URL = os.environ.get("TEST_DATABASE_URL", "postgresql+psycopg://postgres@lo
 # la app apunta a la base de prueba y acepta cookies por http (el cliente de prueba no usa https)
 os.environ["DATABASE_URL"] = TEST_URL
 os.environ["COOKIE_SECURE"] = "false"
+os.environ["CATALOGO_FONDO"] = "0"  # en las pruebas la recarga es inmediata
+os.environ["PRECALENTAR"] = "0"
 os.environ.setdefault("JWT_SECRET", "secreto-de-prueba-" + "x" * 40)
 
 

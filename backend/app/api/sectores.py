@@ -22,7 +22,9 @@ from app.services.sectores import captacion, comun, mercado, zonas
 router = APIRouter(tags=["sectores"])
 OTRO_USUARIO = "Otro usuario modificó esto. Recargá para ver los cambios."
 _CACHE: dict = {"v": None, "t": 0.0, "datos": None}
+_CACHE_CAP: dict = {"v": None, "datos": None}
 _LOCK = threading.Lock()
+_LOCK_CAP = threading.Lock()
 
 CAMPOS_LEGADO = ("id", "tipo", "operacion", "direccion", "barrio", "ciudad", "inmobiliaria", "moneda", "dormitorios",
                  "sup_cub", "sup_tot", "m2_base", "lat", "lng", "estado_aviso", "fecha_baja", "detectada", "pub_aprox",
@@ -81,14 +83,29 @@ def _duenos_legado(db: Session) -> list[dict]:
 
 @router.get("/captacion")
 def captacion_datos(a: Actual = Depends(usuario_actual), db: Session = Depends(get_db)):
-    cat = catalogo()
-    filas = filas_legado()
-    hist = {o["id"]: [(x[1], x[2]) for x in o["hist"] if x[1] is not None and x[2] is not None] for o in cat.data if o["hist"]}
-    dolar = _dolar()
-    s, MED = captacion.senales(filas, hist, dolar)
-    activas = [f for f in filas if f["estado_aviso"] == "activo"]
+    s, MED, activas, dolar = _senales()
     return {"senales": s, "duenos": captacion.duenos(MED, _duenos_legado(db), activas, dolar),
             "seguimiento": _seguimiento(db), "dolar": dolar}
+
+
+def _senales():
+    """Las señales de captación solo cambian cuando llegan datos nuevos: se calculan una vez por versión del catálogo."""
+    cat = catalogo()
+    with _LOCK_CAP:
+        if _CACHE_CAP["v"] != cat.version or _CACHE_CAP["datos"] is None:
+            filas = filas_legado()
+            hist = {o["id"]: [(x[1], x[2]) for x in o["hist"] if x[1] is not None and x[2] is not None] for o in cat.data if o["hist"]}
+            dolar = _dolar()
+            s, med = captacion.senales(filas, hist, dolar)
+            _CACHE_CAP["datos"] = (s, med, [f for f in filas if f["estado_aviso"] == "activo"], dolar)
+            _CACHE_CAP["v"] = cat.version
+        return _CACHE_CAP["datos"]
+
+
+def precalentar(db: Session) -> None:
+    """Deja calculado lo pesado apenas arranca el servidor, para que la primera persona no espere."""
+    mercado_datos(db=db, a=None)  # type: ignore[arg-type]
+    _senales()
 
 
 class SeguirIn(BaseModel):

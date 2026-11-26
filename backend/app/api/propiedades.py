@@ -43,7 +43,7 @@ class FiltrosIn(BaseModel):
     balcon: SiNo = ""
     parrilla: SiNo = ""
     amoblado: SiNo = ""
-    credito: Literal["", "si"] = ""
+    credito: Literal["", "si", "si_nc"] = ""
     estrenar: bool = False
     kw: str = Field("", max_length=200)
     nuevas_horas: int = Field(0, ge=0, le=24 * 365)
@@ -63,7 +63,8 @@ class FiltrosIn(BaseModel):
     qg: str = Field("", max_length=500)
     solo_ids: list[int] | None = Field(None, max_length=5000)
     solo_seleccion: bool = False
-    orden: Literal["", "color", "precio", "dif", "usdm2", "detectada", "vsb", "dormitorios", "sup_cub", "tipo", "barrio"] = ""
+    orden: Literal["", "color", "precio", "dif", "usdm2", "detectada", "vsb", "dormitorios", "sup_cub", "tipo", "barrio",
+                   "fuente", "direccion", "antiguedad", "inmobiliaria"] = ""
     orden_dir: int = 1
 
 
