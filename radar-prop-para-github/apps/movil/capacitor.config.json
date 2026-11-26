@@ -1,0 +1,19 @@
+{
+  "appId": "ar.radarprop.app",
+  "appName": "Radar Prop",
+  "webDir": "www",
+  "backgroundColor": "#14243F",
+  "appendUserAgent": "RadarPropApp",
+  "server": {
+    "url": "https://radar-prop.netlify.app",
+    "errorPath": "sin-conexion.html",
+    "androidScheme": "https"
+  },
+  "android": {
+    "backgroundColor": "#14243F",
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "StatusBar": { "backgroundColor": "#14243F", "style": "DARK", "overlaysWebView": false }
+  }
+}

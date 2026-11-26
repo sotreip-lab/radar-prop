@@ -1,0 +1,15 @@
+{
+  "name": "radar-prop-movil",
+  "private": true,
+  "version": "1.0.0",
+  "description": "App de Android de Radar Prop (Capacitor): visor propio, sin Chrome, que muestra https://radar-prop.netlify.app",
+  "dependencies": {
+    "@capacitor/android": "6.2.4",
+    "@capacitor/app-launcher": "6.0.4",
+    "@capacitor/cli": "6.2.4",
+    "@capacitor/core": "6.2.4",
+    "@capacitor/filesystem": "6.0.4",
+    "@capacitor/share": "6.0.4",
+    "@capacitor/status-bar": "6.0.3"
+  }
+}
