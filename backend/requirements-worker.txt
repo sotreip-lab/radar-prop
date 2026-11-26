@@ -1,4 +1,0 @@
-# Solo lo que necesita el worker (GitHub Actions): sin servidor web.
-sqlalchemy>=2.0
-psycopg[binary]>=3.2
-geoalchemy2>=0.15
