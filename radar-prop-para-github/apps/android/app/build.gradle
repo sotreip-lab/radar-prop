@@ -1,0 +1,41 @@
+// APK de Radar Prop: abre https://radar-prop.netlify.app con el motor de Chrome (Trusted Web Activity).
+// Así funciona todo igual que en la web (Excel, fichas para imprimir, WhatsApp) y se actualiza sola con la web.
+// La clave de firma NO está en el repositorio: la toma de los secretos de GitHub (ANDROID_KEYSTORE_B64 / _PASS).
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'ar.radarprop.app'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'ar.radarprop.app'
+        minSdk 21
+        targetSdk 34
+        versionCode((System.getenv('VERSION_CODE') ?: '1') as int)
+        versionName '1.0.' + (System.getenv('VERSION_CODE') ?: '1')
+        manifestPlaceholders = [hostName: 'radar-prop.netlify.app', defaultUrl: 'https://radar-prop.netlify.app/',
+                                launcherName: 'Radar Prop']
+    }
+    signingConfigs {
+        release {
+            storeFile file(System.getenv('KS_PATH') ?: 'sin-clave.p12')
+            storePassword System.getenv('KS_PASS')
+            keyAlias 'radarprop'
+            keyPassword System.getenv('KS_PASS')
+            storeType 'pkcs12'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+}
