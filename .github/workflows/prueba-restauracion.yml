@@ -29,7 +29,7 @@ jobs:
           RUN=$(gh run list --repo "${{ github.repository }}" --workflow respaldo.yml --status success --limit 1 --json databaseId,createdAt -q '.[0].databaseId')
           [ -n "$RUN" ] || { echo "::error::No hay respaldos todavía"; exit 1; }
           gh run download "$RUN" --repo "${{ github.repository }}" --dir respaldo
-          F=$(find respaldo -name '*.dump.gpg' | head -1)
+          F=$(find respaldo -type f -name '*.dump.gpg' | head -1)
           echo "Respaldo: $F"
           echo "ARCHIVO=$F" >> "$GITHUB_ENV"
       - name: Descifrar
