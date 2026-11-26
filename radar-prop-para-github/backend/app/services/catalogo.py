@@ -25,6 +25,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from app.core.memoria import liberar_memoria
 from app.core.texto import sin_marcas
 from app.scraper.red import ahora_local
 from app.services.credito_lineas import condiciones, simular
@@ -393,6 +394,8 @@ class Catalogo:
             if crudo is not None:
                 self._procesar(*crudo)
                 self.version = v
+                del crudo
+                liberar_memoria()
             self.revisado = time.monotonic()
         return self
 
@@ -466,7 +469,6 @@ class Catalogo:
         if o["precio"] and not precio_real(o["precio"], o["moneda"], o["operacion"]):
             o["_precio_falso"], o["precio"] = o["precio"], None
         o["balcon"] = "Sí" if re.search(r"Balc|Terraza", o["exterior"] or "") else "No informado"
-        o["ficha"] = ficha_whatsapp(o)
         return o
 
     def _analisis(self):
@@ -888,7 +890,7 @@ class Catalogo:
             "cuota": {k: o["_cuota"][k] for k in ("cuota", "prestamo", "anios", "ltv", "ingreso")} | {"banco": o["_cuota"]["linea"]["banco"]}
             if o["_cuota"] else None,
             "dias": o["_dias"] if o["_dias_exacto"] else None, "bajas": o["_bajas"], "baja_pct": o["_baja_pct"],
-            "margen": o["_margen"], "seleccionada": o["id"] in seleccion, "ficha": o["ficha"],
+            "margen": o["_margen"], "seleccionada": o["id"] in seleccion, "ficha": ficha_whatsapp(o),
         }
 
     def detalle(self, pid: int) -> dict | None:
@@ -941,15 +943,18 @@ def _recargar_en_fondo(viejo: Catalogo, version: str) -> None:
         with nuevo.engine.connect() as c:
             crudo = nuevo._leer(c)
         nuevo._procesar(*crudo)
+        del crudo
         nuevo.version, nuevo.revisado = version, time.monotonic()
         with _CAT_LOCK:
             if _CAT is viejo:
                 _CAT = nuevo
+        liberar_memoria()
         # deja listos también el mapa de valores y la captación con los datos nuevos
         from app.api.sectores import precalentar
         from app.db import SessionLocal
         with SessionLocal() as db:
             precalentar(db)
+        liberar_memoria()
     except Exception:  # noqa: BLE001 — si falla, se sigue con los datos anteriores y se reintenta en la próxima consulta
         logging.getLogger("radar").exception("no se pudo recargar el catálogo")
     finally:
