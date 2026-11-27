@@ -27,9 +27,9 @@ from __future__ import annotations
 import logging
 import math
 from datetime import datetime, timedelta
-from decimal import Decimal
 
-from sqlalchemy import text
+from sqlalchemy import BigInteger, Column, Float, Integer, MetaData, String, Table, insert, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from app.services.sectores.comun import clave_direccion, grupo_tipo, precio_valido
@@ -119,6 +119,14 @@ def _metros(la1, ln1, la2, ln2) -> float:
 
 def _punto(lat, lng):
     return (round(lat, 5), round(lng, 5))
+
+
+_MD = MetaData()
+_T_INM = Table("inmuebles", _MD, Column("id", BigInteger, primary_key=True), Column("grupo_tipo", String),
+               Column("operacion", String), Column("dir_clave", String), Column("dormitorios", Integer),
+               Column("m2", Float), Column("lat", Float), Column("lng", Float))
+_T_VINC = Table("inmueble_avisos", _MD, Column("propiedad_id", BigInteger, primary_key=True),
+                Column("inmueble_id", BigInteger), Column("regla", String), Column("detalle", JSONB))
 
 
 def _celda(lat, lng):
@@ -256,8 +264,10 @@ def vincular(db: Session, ahora: datetime | None = None) -> dict[str, int]:
             indexar(inm, f.operacion)
         inm.avisos.append(a)
 
+    # 1) se decide todo en memoria (los inmuebles nuevos con id provisorio negativo)
     nuevos = unidos = 0
-    tocados: set[int] = set()
+    altas_inm: list[tuple[Inmueble, str]] = []
+    vinculos: list[tuple[Aviso, Inmueble, str, dict]] = []
     for a, op in pendientes:
         cands: list[Inmueble] = []
         if a.dir:
@@ -270,9 +280,9 @@ def vincular(db: Session, ahora: datetime | None = None) -> dict[str, int]:
         mejor = None
         vistos = set()
         for inm in cands:
-            if inm.id in vistos:
+            if id(inm) in vistos:
                 continue
-            vistos.add(inm.id)
+            vistos.add(id(inm))
             r = coincide(inm, a, cfg, ahora, repetidas)
             if r is None:
                 continue
@@ -280,30 +290,29 @@ def vincular(db: Session, ahora: datetime | None = None) -> dict[str, int]:
             if mejor is None or clave < mejor[0]:
                 mejor = (clave, inm, r)
         if mejor is None:
-            iid = db.scalar(text(
-                "INSERT INTO inmuebles (grupo_tipo, operacion, dir_clave, dormitorios, m2, lat, lng) "
-                "VALUES (:g, :o, :d, :dorm, :m2, :la, :ln) RETURNING id"),
-                {"g": a.grupo, "o": op, "d": a.dir, "dorm": a.dorm, "m2": a.m2, "la": a.lat, "ln": a.lng})
-            inm = inmuebles[iid] = Inmueble(iid, a)
+            nuevos += 1
+            inm = Inmueble(-nuevos, a)
+            altas_inm.append((inm, op))
             indexar(inm, op)
             regla, det = "nuevo", {}
-            nuevos += 1
         else:
             _, inm, (regla, det) = mejor
             det["con_aviso"] = inm.avisos[0].id if inm.avisos else None
             unidos += 1
         inm.avisos.append(a)
-        tocados.add(inm.id)
-        db.execute(text("INSERT INTO inmueble_avisos (propiedad_id, inmueble_id, regla, detalle) "
-                        "VALUES (:p, :i, :r, CAST(:d AS jsonb)) ON CONFLICT (propiedad_id) DO NOTHING"),
-                   {"p": a.id, "i": inm.id, "r": regla, "d": _json(det)})
+        vinculos.append((a, inm, regla, det))
+    # 2) se graba en bloque (pocas idas y vueltas a la base, importa con Supabase lejos)
+    if altas_inm:
+        ids = db.execute(insert(_T_INM).returning(_T_INM.c.id, sort_by_parameter_order=True), [
+            {"grupo_tipo": inm.grupo, "operacion": op, "dir_clave": inm.dir, "dormitorios": inm.dorm, "m2": inm.m2,
+             "lat": inm.lat, "lng": inm.lng} for inm, op in altas_inm]).scalars().all()
+        for (inm, _), nid in zip(altas_inm, ids, strict=True):
+            inm.id = nid
+    if vinculos:
+        db.execute(insert(_T_VINC), [{"propiedad_id": a.id, "inmueble_id": inm.id, "regla": regla,
+                                      "detalle": det} for a, inm, regla, det in vinculos])
     resumir(db)
     return {"avisos_nuevos": len(pendientes), "inmuebles_nuevos": nuevos, "republicaciones_unidas": unidos}
-
-
-def _json(d: dict) -> str:
-    import json
-    return json.dumps(d, default=lambda v: float(v) if isinstance(v, Decimal) else str(v))
 
 
 def resumir(db: Session):
