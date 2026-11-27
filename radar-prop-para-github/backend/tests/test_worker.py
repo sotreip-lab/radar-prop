@@ -113,6 +113,15 @@ def test_segunda_corrida_detecta_bajas_y_vueltas(pg_url, sitio):
     correr(pg_url, solo=("bbp",))
     assert _filas(pg_url, "SELECT estado, fecha_baja FROM propiedades WHERE id_externo='95003'")[0] == {
         "estado": "activa", "fecha_baja": None}
+    # mapa de valores: cada cambio de estado queda como evento con fecha
+    ev = [e["tipo"] for e in _filas(pg_url, "SELECT e.tipo FROM eventos_aviso e JOIN propiedades p ON p.id = e.propiedad_id "
+                                            "WHERE p.id_externo = '95003' ORDER BY e.fecha, e.id")]
+    assert ev[0] == "alta" and "baja" in ev and ev[-1] == "reaparece"
+    assert _filas(pg_url, "SELECT count(*) AS n FROM eventos_aviso e JOIN propiedades p ON p.id = e.propiedad_id "
+                          "WHERE p.id_externo = '95004' AND e.tipo = 'alta' AND e.exacta")[0]["n"] == 1
+    # los avisos de venta quedan en algún inmueble
+    assert _filas(pg_url, "SELECT count(*) AS n FROM propiedades p WHERE p.operacion = 'Venta' AND NOT EXISTS "
+                          "(SELECT 1 FROM inmueble_avisos ia WHERE ia.propiedad_id = p.id)")[0]["n"] == 0
 
 
 def test_ibb_406_sin_cabecera_y_errores_de_red_no_rompen(pg_url, sitio, monkeypatch):
