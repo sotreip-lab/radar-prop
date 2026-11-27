@@ -36,6 +36,7 @@ from app.scraper import bbp, ibb
 from app.scraper.ids import id_externo
 from app.scraper.red import ahora_local, bajar, fecha_ultima_modificacion
 from app.scraper.texto import detectar_amoblado
+from app.services.valuacion import inmuebles as valuacion
 
 CANDADO = 72_340_01          # número fijo del candado de la base (cualquier valor, siempre el mismo)
 LOTE = 50                    # fichas por transacción
@@ -84,6 +85,7 @@ def _fecha(v) -> datetime | None:
 class Corrida:
     def __init__(self, eng, modo: str, max_minutos: float):
         self.eng = eng
+        self.con_eventos = False
         self.modo = modo
         self.limite = time.monotonic() + max_minutos * 60
         self.c = {"nuevas": 0, "actualizadas": 0, "bajas": 0, "cambios_precio": 0, "errores": 0}
@@ -91,6 +93,11 @@ class Corrida:
         self.genericas: set[tuple[float, float]] = set()
 
     # ------------------------------------------------------------ tiempo
+    def evento(self, db: Session, *args, **kw):
+        """Evento para el mapa de valores (si la base ya tiene la tabla: la migración la aplica el deploy de la API)."""
+        if self.con_eventos:
+            valuacion.registrar_evento(db, *args, **kw)
+
     def queda_tiempo(self) -> bool:
         return time.monotonic() < self.limite
 
@@ -130,6 +137,7 @@ class Corrida:
         ahora = ahora_local()
         existente = db.scalar(select(Propiedad).where(Propiedad.plataforma == plat, Propiedad.id_externo == ide))
         nueva = existente is None
+        estado_ant = existente.estado if existente is not None else None
         if existente is not None:
             p = existente
         else:
@@ -155,6 +163,9 @@ class Corrida:
                 valores[campo] = nuevo_v
         precio = _dec(d.get("precio"))
         if not nueva and p.precio is not None and precio is not None and abs(p.precio - precio) > Decimal("0.5"):
+            if (p.moneda or "") == (d.get("moneda") or ""):
+                self.evento(db, p.id, "precio", ahora, moneda=d.get("moneda"), precio=precio,
+                                           precio_anterior=p.precio)
             p.precio_anterior, p.cambio_precio = p.precio, ahora
             self.c["cambios_precio"] += 1
             if (p.moneda or "") == (d.get("moneda") or ""):
@@ -191,13 +202,21 @@ class Corrida:
         p.ultima_vez_vista, p.ultima_verif_origen, p.intentos = ahora, None, 0
         p.datos_extra = extra
         p.actualizado_en = func.now()
+        if nueva:
+            db.flush()  # para tener el id
+            self.evento(db, p.id, "alta", ahora, moneda=p.moneda, precio=precio)
+        elif estado_ant == "baja":
+            self.evento(db, p.id, "reaparece", ahora, moneda=p.moneda, precio=precio)
         self.c["nuevas" if nueva else "actualizadas"] += 1
 
     def marcar_baja(self, db: Session, plat: str, ide: str):
         ahora = ahora_local()
-        estado_ant = db.scalar(select(Propiedad.estado).where(Propiedad.plataforma == plat, Propiedad.id_externo == ide))
-        if estado_ant is None or estado_ant == "baja":
+        fila = db.execute(select(Propiedad.id, Propiedad.estado, Propiedad.moneda, Propiedad.precio).where(
+            Propiedad.plataforma == plat, Propiedad.id_externo == ide)).first()
+        if fila is None or fila.estado == "baja":
             return
+        estado_ant = fila.estado
+        self.evento(db, fila.id, "baja", ahora, moneda=fila.moneda, precio=fila.precio)
         db.execute(update(Propiedad).where(Propiedad.plataforma == plat, Propiedad.id_externo == ide).values(
             estado="baja", fecha_baja=ahora, fecha_baja_origen=None, ultima_vez_vista=ahora, actualizado_en=func.now()))
         if estado_ant == "activa":
@@ -430,6 +449,19 @@ def actualizar_credito_uva(cr: Corrida):
 
 
 # ================================================================== corrida completa
+def preparar_valuacion(cr: "Corrida"):
+    """Inmuebles y republicaciones para el mapa de valores. Nunca frena la actualización."""
+    if not cr.con_eventos:
+        cr.aviso("Mapa de valores: falta aplicar la migración 0004 en la base; se saltea")
+        return
+    try:
+        with Session(cr.eng) as db, db.begin():
+            cr.detalle["valuacion"] = valuacion.preparar(db)
+    except Exception as e:
+        cr.aviso(f"Mapa de valores: {type(e).__name__}: {e}")
+        log.exception("valuación")
+
+
 def correr(url: str, modo: str = "rapida", max_minutos: float = 11, solo: Iterable[str] = ("bbp", "ibb", "dolar")) -> dict:
     eng = engine_para(url_psycopg(url), pool_size=2, max_overflow=2, pool_pre_ping=True)
     candado = eng.connect()
@@ -445,6 +477,7 @@ def correr(url: str, modo: str = "rapida", max_minutos: float = 11, solo: Iterab
             db.flush()
             corrida_id = fila.id
             cr.cargar_genericas(db)
+            cr.con_eventos = db.scalar(text("SELECT to_regclass('public.eventos_aviso') IS NOT NULL"))
             anterior = _fecha(cr.meta_get(db, "ultima_revision_sitemap"))
         t_ahora = ahora_local()
         estado = "ok"
@@ -459,6 +492,7 @@ def correr(url: str, modo: str = "rapida", max_minutos: float = 11, solo: Iterab
                 actualizar_bbp(cr, (anterior, t_ahora))
             if "ibb" in solo:
                 actualizar_ibb(cr)
+            preparar_valuacion(cr)
             with Session(eng) as db, db.begin():
                 cr.meta_set(db, "ultima_actualizacion", ahora_local().strftime("%Y-%m-%d %H:%M:%S"))
                 if modo == "completa":
@@ -466,6 +500,7 @@ def correr(url: str, modo: str = "rapida", max_minutos: float = 11, solo: Iterab
         except SinTiempo as e:
             estado = "parcial"
             cr.aviso(f"Se terminó el tiempo en «{e}»; sigue en la próxima corrida")
+            preparar_valuacion(cr)
         except Exception as e:
             estado = "error"
             cr.aviso(f"ERROR: {type(e).__name__}: {e}")
